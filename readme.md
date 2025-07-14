@@ -216,7 +216,6 @@ policy = "OnFailure"
 | Health Checks          | Planned| ❌    | ❌    |
 | Logging                | Advanced| Basic| Basic |
 | Service Accounts       | Full   | Basic | Basic |
-| .NET Integration       | Native | Java  | Native|
 
 **Advantages:**  
 - Built-in observability (metrics, alerting)  
