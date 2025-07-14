@@ -1,0 +1,51 @@
+# Simple WinLet Service Configuration
+# This example shows basic service management without complex monitoring
+
+[service]
+name = "my-web-service"
+display_name = "My Web Service"
+description = "A simple web service managed by WinLet"
+
+[process]
+executable = "node"
+arguments = ["server.js"]
+working_directory = "C:\\DevOps"
+environment = { NODE_ENV = "production", PORT = "3000" }
+
+[startup]
+mode = "automatic"
+delay_seconds = 5
+retry_count = 3
+retry_delay_seconds = 15
+
+[shutdown]
+mode = "graceful"
+timeout_seconds = 30
+kill_timeout_seconds = 10
+
+# Basic logging configuration
+[logging]
+mode = "append"
+directory = "C:\\DevOps\\logs"
+level = "Information"
+
+[logging.stdout]
+filename = "app.log"
+
+[logging.stderr]
+filename = "app-error.log"
+
+# Simple restart policy
+[restart]
+policy = "OnFailure"
+delay_seconds = 5
+max_attempts = 3
+window_seconds = 300
+
+# Optional health check
+[health_check]
+type = "Http"
+endpoint = "http://localhost:3000/health"
+interval_seconds = 30
+timeout_seconds = 10
+failure_threshold = 3 
