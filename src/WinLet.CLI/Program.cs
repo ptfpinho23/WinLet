@@ -12,6 +12,16 @@ class Program
     [SupportedOSPlatform("windows")]
     static async Task<int> Main(string[] args)
     {
+        // Check for UAC elevation requirement for admin operations
+        if (args.Length > 0 && UacHelper.RequiresAdminPrivileges(args[0]))
+        {
+            if (UacHelper.ElevateIfRequired(args))
+            {
+                // Process was restarted with elevation, this code won't be reached
+                return 0;
+            }
+        }
+
         // Create root command
         var rootCommand = new RootCommand("WinLet - Modern Windows Service Manager")
         {
@@ -46,6 +56,14 @@ class Program
         {
             try
             {
+                // Double-check admin privileges before proceeding
+                if (!UacHelper.IsRunningAsAdministrator())
+                {
+                    Console.WriteLine("❌ Error: Administrator privileges are required to install services.");
+                    Console.WriteLine("   Please run this command from an elevated command prompt or allow UAC elevation.");
+                    Environment.Exit(1);
+                }
+
                 var config = ConfigLoader.LoadFromFile(configPath);
                 var serviceManager = CreateServiceManager();
                 
@@ -63,6 +81,18 @@ class Program
                 Console.WriteLine($"   Display Name: {config.DisplayName}");
                 if (!string.IsNullOrEmpty(config.Description))
                     Console.WriteLine($"   Description: {config.Description}");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.WriteLine("❌ Error: Access denied. Administrator privileges are required to install services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5) // ERROR_ACCESS_DENIED
+            {
+                Console.WriteLine("❌ Error: Access denied. Administrator privileges are required to install services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
             }
             catch (Exception ex)
             {
@@ -91,11 +121,31 @@ class Program
         {
             try
             {
+                // Double-check admin privileges before proceeding
+                if (!UacHelper.IsRunningAsAdministrator())
+                {
+                    Console.WriteLine("❌ Error: Administrator privileges are required to uninstall services.");
+                    Console.WriteLine("   Please run this command from an elevated command prompt or allow UAC elevation.");
+                    Environment.Exit(1);
+                }
+
                 var serviceManager = CreateServiceManager();
                 
                 Console.WriteLine($"Uninstalling service: {serviceName}");
                 await serviceManager.UninstallServiceAsync(serviceName);
                 Console.WriteLine($"✅ Service '{serviceName}' uninstalled successfully!");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.WriteLine("❌ Error: Access denied. Administrator privileges are required to uninstall services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5) // ERROR_ACCESS_DENIED
+            {
+                Console.WriteLine("❌ Error: Access denied. Administrator privileges are required to uninstall services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
             }
             catch (Exception ex)
             {
@@ -124,11 +174,31 @@ class Program
         {
             try
             {
+                // Double-check admin privileges before proceeding
+                if (!UacHelper.IsRunningAsAdministrator())
+                {
+                    Console.WriteLine("❌ Error: Administrator privileges are required to start services.");
+                    Console.WriteLine("   Please run this command from an elevated command prompt or allow UAC elevation.");
+                    Environment.Exit(1);
+                }
+
                 var serviceManager = CreateServiceManager();
                 
                 Console.WriteLine($"Starting service: {serviceName}");
                 await serviceManager.StartServiceAsync(serviceName);
                 Console.WriteLine($"✅ Service '{serviceName}' started successfully!");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.WriteLine("❌ Error: Access denied. Administrator privileges are required to start services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5) // ERROR_ACCESS_DENIED
+            {
+                Console.WriteLine("❌ Error: Access denied. Administrator privileges are required to start services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
             }
             catch (Exception ex)
             {
@@ -157,11 +227,31 @@ class Program
         {
             try
             {
+                // Double-check admin privileges before proceeding
+                if (!UacHelper.IsRunningAsAdministrator())
+                {
+                    Console.WriteLine("❌ Error: Administrator privileges are required to stop services.");
+                    Console.WriteLine("   Please run this command from an elevated command prompt or allow UAC elevation.");
+                    Environment.Exit(1);
+                }
+
                 var serviceManager = CreateServiceManager();
                 
                 Console.WriteLine($"Stopping service: {serviceName}");
                 await serviceManager.StopServiceAsync(serviceName);
                 Console.WriteLine($"✅ Service '{serviceName}' stopped successfully!");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.WriteLine("❌ Error: Access denied. Administrator privileges are required to stop services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5) // ERROR_ACCESS_DENIED
+            {
+                Console.WriteLine("❌ Error: Access denied. Administrator privileges are required to stop services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
             }
             catch (Exception ex)
             {
