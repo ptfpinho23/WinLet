@@ -2,7 +2,11 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinLet", "WinLet.csproj", "{6793038A-41DF-DB28-D915-BF3AAA7C55E3}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinLet.Core", "src\WinLet.Core\WinLet.Core.csproj", "{A1E04EC0-301F-11D3-BF4B-00C04F79EFBC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinLet.CLI", "src\WinLet.CLI\WinLet.CLI.csproj", "{B2E04EC0-301F-11D3-BF4B-00C04F79EFBC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinLet.Service", "src\WinLet.Service\WinLet.Service.csproj", "{C3E04EC0-301F-11D3-BF4B-00C04F79EFBC}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -10,10 +14,18 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{6793038A-41DF-DB28-D915-BF3AAA7C55E3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6793038A-41DF-DB28-D915-BF3AAA7C55E3}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6793038A-41DF-DB28-D915-BF3AAA7C55E3}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6793038A-41DF-DB28-D915-BF3AAA7C55E3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B2E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B2E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B2E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B2E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C3E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C3E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C3E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C3E04EC0-301F-11D3-BF4B-00C04F79EFBC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
