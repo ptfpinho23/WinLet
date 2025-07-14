@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinLet", "WinLet.csproj", "{6793038A-41DF-DB28-D915-BF3AAA7C55E3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6793038A-41DF-DB28-D915-BF3AAA7C55E3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6793038A-41DF-DB28-D915-BF3AAA7C55E3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6793038A-41DF-DB28-D915-BF3AAA7C55E3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6793038A-41DF-DB28-D915-BF3AAA7C55E3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A15AD528-398B-4EE4-89D5-9FAE44FBC3B5}
+	EndGlobalSection
+EndGlobal
