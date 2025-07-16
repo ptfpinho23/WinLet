@@ -61,54 +61,89 @@ class Program
         {
             try
             {
+                Console.WriteLine("Starting service installation...");
+                
                 // Double-check admin privileges before proceeding
                 if (!UacHelper.IsRunningAsAdministrator())
                 {
-                    Console.WriteLine("❌ Error: Administrator privileges are required to install services.");
+                    Console.WriteLine("Error: Administrator privileges are required to install services.");
                     Console.WriteLine("   Please run this command from an elevated command prompt or allow UAC elevation.");
                     Environment.Exit(1);
                 }
 
+                Console.WriteLine($"Running with administrator privileges");
+                Console.WriteLine($"Loading configuration from: {configPath}");
+                
+                if (!File.Exists(configPath))
+                {
+                    Console.WriteLine($"Error: Configuration file not found: {configPath}");
+                    Environment.Exit(1);
+                }
+
                 var config = ConfigLoader.LoadFromFile(configPath);
+                Console.WriteLine($"Configuration loaded successfully");
+                Console.WriteLine($"   Service Name: {config.Name}");
+                Console.WriteLine($"   Display Name: {config.DisplayName}");
+                Console.WriteLine($"   Executable: {config.Process.Executable}");
+                
                 var serviceManager = CreateServiceManager();
                 
                 // Get the WinLet.Service executable path (should be alongside the CLI)
                 var serviceExePath = Path.Combine(AppContext.BaseDirectory, "service", "WinLetService.exe");
+                Console.WriteLine($"Looking for WinLetService.exe at: {serviceExePath}");
+                
                 if (!File.Exists(serviceExePath))
                 {
                     // Try looking in the same directory as the CLI
                     serviceExePath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath) ?? "", "service", "WinLetService.exe");
+                    Console.WriteLine($"Trying alternative location: {serviceExePath}");
                 }
                 
                 if (!File.Exists(serviceExePath))
                 {
-                    Console.WriteLine("❌ Error: WinLetService.exe not found. Please ensure the service is built and published.");
+                    Console.WriteLine("Error: WinLetService.exe not found. Please ensure the service is built and published.");
                     Console.WriteLine($"   Expected location: {serviceExePath}");
+                    Console.WriteLine($"   Current directory: {Environment.CurrentDirectory}");
+                    Console.WriteLine($"   Process path: {Environment.ProcessPath}");
                     Environment.Exit(1);
                 }
                 
+                Console.WriteLine($"Found WinLetService.exe at: {serviceExePath}");
                 Console.WriteLine($"Installing service: {config.Name}");
+                
                 await serviceManager.InstallServiceAsync(config, serviceExePath, configPath);
-                Console.WriteLine($"✅ Service '{config.Name}' installed successfully!");
+                
+                Console.WriteLine($"Service '{config.Name}' installed successfully!");
                 Console.WriteLine($"   Display Name: {config.DisplayName}");
                 if (!string.IsNullOrEmpty(config.Description))
                     Console.WriteLine($"   Description: {config.Description}");
+                Console.WriteLine($"Use 'winlet start --name {config.Name}' to start the service");
+            }
+            catch (ConfigurationException ex)
+            {
+                Console.WriteLine($"Configuration Error: {ex.Message}");
+                Environment.Exit(1);
             }
             catch (UnauthorizedAccessException)
             {
-                Console.WriteLine("❌ Error: Access denied. Administrator privileges are required to install services.");
+                Console.WriteLine("Error: Access denied. Administrator privileges are required to install services.");
                 Console.WriteLine("   Please run this command from an elevated command prompt.");
                 Environment.Exit(1);
             }
             catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5) // ERROR_ACCESS_DENIED
             {
-                Console.WriteLine("❌ Error: Access denied. Administrator privileges are required to install services.");
+                Console.WriteLine("Error: Access denied. Administrator privileges are required to install services.");
                 Console.WriteLine("   Please run this command from an elevated command prompt.");
                 Environment.Exit(1);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Error: {ex.Message}");
+                Console.WriteLine($"Error: {ex.Message}");
+                Console.WriteLine($"   Exception Type: {ex.GetType().Name}");
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"   Inner Exception: {ex.InnerException.Message}");
+                }
                 Environment.Exit(1);
             }
         }, configOption);

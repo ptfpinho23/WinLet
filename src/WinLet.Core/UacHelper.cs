@@ -49,7 +49,7 @@ public static class UacHelper
                 throw new InvalidOperationException("Could not determine current process path");
             }
 
-            Console.WriteLine("🔒 Administrator privileges required.");
+            Console.WriteLine("Administrator privileges required.");
             Console.WriteLine("   Requesting UAC elevation...");
             
             // Properly escape arguments for command line
