@@ -13,7 +13,12 @@ class Program
     static async Task<int> Main(string[] args)
     {
         // Check for UAC elevation requirement for admin operations
-        if (args.Length > 0 && UacHelper.RequiresAdminPrivileges(args[0]))
+        // But skip elevation for help commands
+        if (args.Length > 0 && 
+            UacHelper.RequiresAdminPrivileges(args[0]) && 
+            !args.Contains("--help") && 
+            !args.Contains("-h") && 
+            !args.Contains("-?"))
         {
             if (UacHelper.ElevateIfRequired(args))
             {
