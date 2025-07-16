@@ -68,11 +68,11 @@ public static class UacHelper
             // Create process start info with runas verb for UAC elevation
             var startInfo = new ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = $"/k \"\"{currentProcess}\" {arguments} & pause\"",
+                FileName = currentProcess,
+                Arguments = arguments,
                 UseShellExecute = true,
                 Verb = "runas", // This triggers UAC elevation
-                WindowStyle = ProcessWindowStyle.Normal
+                WindowStyle = ProcessWindowStyle.Hidden
             };
             
             // Start the elevated process
