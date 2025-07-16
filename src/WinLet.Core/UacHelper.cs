@@ -134,7 +134,7 @@ public static class UacHelper
     /// <param name="operation">The operation that requires privileges</param>
     public static void ShowPrivilegeRequirementMessage(string operation)
     {
-        Console.WriteLine($"🔒 The '{operation}' operation requires administrator privileges.");
+        Console.WriteLine($"The '{operation}' operation requires administrator privileges.");
         Console.WriteLine("   You will be prompted to elevate permissions.");
         Console.WriteLine();
     }
