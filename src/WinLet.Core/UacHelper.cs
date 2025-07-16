@@ -49,10 +49,8 @@ public static class UacHelper
                 throw new InvalidOperationException("Could not determine current process path");
             }
 
-            Console.WriteLine("🔒 Administrator privileges required for this operation.");
-            Console.WriteLine("   Requesting elevation...");
-            Console.WriteLine($"   Process: {currentProcess}");
-            Console.WriteLine($"   Arguments: [{string.Join(", ", args)}]");
+            Console.WriteLine("🔒 Administrator privileges required.");
+            Console.WriteLine("   Requesting UAC elevation...");
             
             // Properly escape arguments for command line
             var escapedArgs = args.Select(arg => 
@@ -66,34 +64,30 @@ public static class UacHelper
             });
             
             var arguments = string.Join(" ", escapedArgs);
-            Console.WriteLine($"   Escaped arguments: {arguments}");
             
             // Create process start info with runas verb for UAC elevation
             var startInfo = new ProcessStartInfo
             {
-                FileName = currentProcess,
-                Arguments = arguments,
+                FileName = "cmd.exe",
+                Arguments = $"/k \"\"{currentProcess}\" {arguments} & pause\"",
                 UseShellExecute = true,
                 Verb = "runas", // This triggers UAC elevation
                 WindowStyle = ProcessWindowStyle.Normal
             };
-
-            Console.WriteLine("   Starting elevated process...");
             
             // Start the elevated process
             using var elevatedProcess = Process.Start(startInfo);
             
             if (elevatedProcess != null)
             {
-                Console.WriteLine($"   Elevated process started with PID: {elevatedProcess.Id}");
-                Console.WriteLine("   Waiting for elevated process to complete...");
-                
                 // Wait for the elevated process to complete
                 elevatedProcess.WaitForExit();
                 
-                Console.WriteLine($"   Elevated process exited with code: {elevatedProcess.ExitCode}");
-                
                 // Exit with the same code as the elevated process
+                if (elevatedProcess.ExitCode != 0)
+                {
+                    Console.WriteLine($"❌ Operation failed (exit code: {elevatedProcess.ExitCode})");
+                }
                 Environment.Exit(elevatedProcess.ExitCode);
             }
             else
@@ -105,23 +99,18 @@ public static class UacHelper
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
             // User cancelled the UAC prompt
-            Console.WriteLine("❌ Operation cancelled by user (UAC prompt declined)");
+            Console.WriteLine("❌ Operation cancelled by user");
             Environment.Exit(1);
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
             // Other Win32 errors
-            Console.WriteLine($"❌ Windows system error during elevation: {ex.Message} (Error code: {ex.NativeErrorCode})");
+            Console.WriteLine($"❌ Elevation failed: {ex.Message}");
             Environment.Exit(1);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Failed to elevate privileges: {ex.Message}");
-            Console.WriteLine($"   Exception type: {ex.GetType().Name}");
-            if (ex.InnerException != null)
-            {
-                Console.WriteLine($"   Inner exception: {ex.InnerException.Message}");
-            }
             Environment.Exit(1);
         }
 

@@ -1,13 +1,12 @@
-# WinLet Configuration - Web Server Example
-name = "my-web-server"
-display_name = "My Web Server"
-description = "A simple Node.js web server managed by WinLet"
+[service]
+name = "my-web-app"
+display_name = "My Web Application"
+description = "A Node.js web application"
 
 [process]
 executable = "node"
 arguments = "server.js"
-working_directory = "C:\\DevOps"
-shutdown_timeout_seconds = 30
+working_directory = "C:\\Projects\\MyWebApp"
 
 [process.environment]
 NODE_ENV = "production"
@@ -16,19 +15,9 @@ PORT = "3000"
 [logging]
 level = "Information"
 log_to_console = true
-log_file = "C:\\DevOps\\my-web-server.log"
-max_log_file_size_mb = 10
-max_log_files = 5
+log_path = "C:\\Logs\\MyWebApp"
 
 [restart]
 policy = "OnFailure"
-delay_seconds = 5
 max_attempts = 3
-window_seconds = 300
-
-[health_check]
-type = "Http"
-endpoint = "http://localhost:3000/health"
-interval_seconds = 30
-timeout_seconds = 10
-failure_threshold = 3 
+delay_seconds = 10 
