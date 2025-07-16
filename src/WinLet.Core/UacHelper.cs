@@ -52,11 +52,24 @@ public static class UacHelper
             Console.WriteLine("🔒 Administrator privileges required for this operation.");
             Console.WriteLine("   Requesting elevation...");
             
+            // Properly escape arguments for command line
+            var escapedArgs = args.Select(arg => 
+            {
+                // If argument contains spaces or special characters, wrap in quotes
+                if (arg.Contains(' ') || arg.Contains('"') || arg.Contains('\\'))
+                {
+                    return $"\"{arg.Replace("\"", "\\\"")}\"";
+                }
+                return arg;
+            });
+            
+            var arguments = string.Join(" ", escapedArgs);
+            
             // Create process start info with runas verb for UAC elevation
             var startInfo = new ProcessStartInfo
             {
                 FileName = currentProcess,
-                Arguments = string.Join(" ", args.Select(arg => $"\"{arg}\"")),
+                Arguments = arguments,
                 UseShellExecute = true,
                 Verb = "runas" // This triggers UAC elevation
             };
