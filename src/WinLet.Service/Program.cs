@@ -43,19 +43,16 @@ public class Program
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole();
         
-        // Create a file for debugging (manual logging)
-        var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WinLet", "Logs");
-        Directory.CreateDirectory(logDir);
-        var logFile = Path.Combine(logDir, "service.log");
+        // We'll set up file logging after we load the config to use the same directory
         
-        // Add custom file logger
-        builder.Logging.AddProvider(new FileLoggerProvider(logFile));
-        
-        // Write startup info to log file
+        // Write startup info to temp log file initially
         try
         {
+            var tempLogDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WinLet", "Logs");
+            Directory.CreateDirectory(tempLogDir);
+            var tempLogFile = Path.Combine(tempLogDir, "service.log");
             var startupMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] WinLet Service starting with args: [{string.Join(", ", args)}]\n";
-            File.AppendAllText(logFile, startupMessage);
+            File.AppendAllText(tempLogFile, startupMessage);
         }
         catch (Exception ex)
         {

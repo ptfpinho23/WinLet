@@ -42,21 +42,42 @@ public class WinLetWorkerService : BackgroundService
             _logger.LogInformation("📖 Loading configuration...");
             var config = ConfigLoader.LoadFromFile(configPath);
             
+            // Now that we have the config, set up file logging in the same directory as application logs
+            var logDir = !string.IsNullOrEmpty(config.Logging.LogPath) 
+                ? config.Logging.LogPath 
+                : Path.Combine(Path.GetDirectoryName(configPath) ?? Environment.CurrentDirectory, "logs");
+            
+            Directory.CreateDirectory(logDir);
+            var winletLogFile = Path.Combine(logDir, "winlet.log");
+            
+            // Set up WinLet service file logging
+            var loggerFactory = LoggerFactory.Create(builder => 
+            {
+                builder.AddConsole();
+                builder.AddProvider(new FileLoggerProvider(winletLogFile));
+            });
+            
+            // Replace the current logger with one that includes file logging
+            var newLogger = loggerFactory.CreateLogger<WinLetWorkerService>();
+            
             _logger.LogInformation("✅ Configuration loaded successfully");
-            _logger.LogInformation("🔧 Service: {ServiceName} ({DisplayName})", config.Name, config.DisplayName);
-            _logger.LogInformation("🎯 Starting managed process: {ProcessName}", config.Process.Executable);
-            _logger.LogInformation("📂 Working directory: {WorkingDirectory}", config.Process.WorkingDirectory);
-            _logger.LogInformation("⚙️  Arguments: {Arguments}", config.Process.Arguments ?? "(none)");
-            _logger.LogInformation("🔄 Restart policy: {RestartPolicy} (max {MaxAttempts} attempts)", config.Restart.Policy, config.Restart.MaxAttempts);
+            newLogger.LogInformation("📁 WinLet service logs will be written to: {LogFile}", winletLogFile);
+            
+            // Use the new logger for subsequent log messages
+            newLogger.LogInformation("🔧 Service: {ServiceName} ({DisplayName})", config.Name, config.DisplayName);
+            newLogger.LogInformation("🎯 Starting managed process: {ProcessName}", config.Process.Executable);
+            newLogger.LogInformation("📂 Working directory: {WorkingDirectory}", config.Process.WorkingDirectory);
+            newLogger.LogInformation("⚙️  Arguments: {Arguments}", config.Process.Arguments ?? "(none)");
+            newLogger.LogInformation("🔄 Restart policy: {RestartPolicy} (max {MaxAttempts} attempts)", config.Restart.Policy, config.Restart.MaxAttempts);
             
             // Create and start the process runner
-            var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
-            _processRunner = new ProcessRunner(config, loggerFactory.CreateLogger<ProcessRunner>());
+            var processLoggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+            _processRunner = new ProcessRunner(config, processLoggerFactory.CreateLogger<ProcessRunner>());
             
-            _logger.LogInformation("🏁 Starting managed process...");
+            newLogger.LogInformation("🏁 Starting managed process...");
             await _processRunner.StartAsync(stoppingToken);
 
-            _logger.LogInformation("👀 Monitoring managed process...");
+            newLogger.LogInformation("👀 Monitoring managed process...");
             
             // Keep the service running while the process is active
             while (!stoppingToken.IsCancellationRequested && _processRunner?.IsRunning == true)
@@ -66,11 +87,11 @@ public class WinLetWorkerService : BackgroundService
             
             if (_processRunner?.IsRunning != true)
             {
-                _logger.LogWarning("⚠️  Managed process has stopped running");
+                newLogger.LogWarning("⚠️  Managed process has stopped running");
             }
             else
             {
-                _logger.LogInformation("🔄 Service shutdown requested");
+                newLogger.LogInformation("🔄 Service shutdown requested");
             }
         }
         catch (OperationCanceledException)
