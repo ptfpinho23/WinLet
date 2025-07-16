@@ -1,224 +1,158 @@
+<div align="center">
+
+<img src="winlet.png" alt="WinLet Logo" width="128" height="128">
+
 # WinLet
 
-**WinLet** is a modern Windows service manager designed to replace tools like WinSW and NSSM. It wraps any application (executables, scripts, Node.js, etc.) as a native Windows Service, using simple TOML configuration.
+**Modern Windows Service Manager**
 
-## Features
+*Wrap any application as a Windows Service using simple TOML configuration.*
 
-- **Modern CLI** – Intuitive command-line interface (System.CommandLine)
-- **TOML Configuration** – Simple, readable config files
-- **Auto-restart** – Flexible restart policies
-- **Structured Logging** – File rotation, console output
-- **Prometheus Metrics** – Built-in metrics server
-- **Alerting** – Email, Slack, webhook notifications
-- **Performance Monitoring** – Process, system, and custom metrics
-- **Graceful Shutdown** – Proper process lifecycle management
-- **Windows Native** – Deep integration with Windows Services & Event Log
+</div>
 
-## Quick Start
+## Installation and Usage
 
-### 1. Build
+### 1. Build WinLet
+```powershell
+git clone https://github.com/your-repo/WinLet.git
+cd WinLet
+.\build.ps1
 
-```bash
-dotnet build --configuration Release
+# Clean...
+.\clean.ps1
 ```
 
-### 2. Create a Service Config
-
-Example (`my-service.toml`):
-
+### 2. Create Configuration
+Create `my-app.toml`:
 ```toml
+[service]
 name = "my-web-app"
 display_name = "My Web Application"
-description = "A Node.js web application"
 
 [process]
 executable = "node"
 arguments = "app.js"
 working_directory = "C:\\Apps\\MyWebApp"
 
+[logging]
+log_path = "C:\\Logs\\MyWebApp"
+
 [restart]
 policy = "OnFailure"
 max_attempts = 3
 ```
 
-### 3. Install & Manage
+### 3. Install & Start Service
+```powershell
+# Install (requires admin - will prompt for UAC)
+.\bin\WinLet.exe install --config my-app.toml
 
-```bash
-winlet install --config my-service.toml
-winlet start --name my-web-app
-winlet status --name my-web-app
-winlet stop --name my-web-app
-winlet uninstall --name my-web-app
+# Start service
+.\bin\WinLet.exe start --name my-web-app
 ```
 
-## Configuration Reference
+### 4. Manage Service
+```powershell
+# Check status
+.\bin\WinLet.exe status --name my-web-app
 
-**Service Info**
-```toml
-name = "service-name"
-display_name = "Display Name"
-description = "Service description"
+# View logs
+.\bin\WinLet.exe logs --name my-web-app
+
+# Stop service
+.\bin\WinLet.exe stop --name my-web-app
 ```
 
-**Process**
-```toml
-[process]
-executable = "path/to/executable"
-arguments = "args"
-working_directory = "C:\\work\\dir"
-shutdown_timeout_seconds = 30
+## Logging
 
-[process.environment]
-VAR1 = "value1"
-```
-
-**Logging**
-```toml
-[logging]
-level = "Information"
-log_to_console = true
-log_path = "C:\\Logs\\MyService"
-mode = "append"
-size_threshold_kb = 10240
-keep_files = 8
-```
-
-**Restart Policy**
-```toml
-[restart]
-policy = "OnFailure"  # Never, Always, OnFailure
-delay_seconds = 5
-max_attempts = 3
-```
-
-**Service Account**
-```toml
-[service_account]
-username = "NT AUTHORITY\\NetworkService"
-password = "SecurePassword"
-allow_service_logon = true
-```
-
-**Metrics**
-```toml
-[metrics]
-enabled = true
-port = 9090
-host = "localhost"
-collection_interval_seconds = 15
-```
-
-**Alerting**
-```toml
-[alerting]
-enabled = true
-
-[alerting.slack]
-webhook_url = "https://hooks.slack.com/services/..."
-channel = "#alerts"
-
-[alerting.email]
-smtp_server = "smtp.company.com"
-from_address = "winlet@company.com"
-to_addresses = ["team@company.com"]
-
-[[alerting.rules]]
-name = "High Memory Usage"
-metric = "winlet_process_memory_bytes"
-condition = ">"
-threshold = 1073741824
-duration_seconds = 120
-severity = "Warning"
-```
-
-**Health Checks (Planned)**
-```toml
-[health_check]
-type = "Http"
-endpoint = "http://localhost:3000/health"
-interval_seconds = 30
-```
+WinLet creates logs in your configured `log_path`:
+- `my-web-app.out.log` - Application stdout
+- `my-web-app.err.log` - Application stderr  
+- `winlet.log` - Service management events
 
 ## Examples
 
-**Node.js**
+**Node.js Server:**
 ```toml
-name = "my-web-server"
+[service]
+name = "my-api"
 [process]
 executable = "node"
 arguments = "server.js"
-working_directory = "C:\\Apps\\MyWebServer"
+working_directory = "C:\\Apps\\MyAPI"
 [process.environment]
 NODE_ENV = "production"
-PORT = "3000"
-[restart]
-policy = "OnFailure"
 ```
 
-**Python**
+**Python Script:**
 ```toml
+[service]
 name = "data-processor"
 [process]
 executable = "python"
-arguments = "processor.py --config prod.json"
-working_directory = "C:\\Scripts\\DataProcessor"
-[restart]
-policy = "Always"
+arguments = "processor.py"
+working_directory = "C:\\Scripts"
 ```
 
-**.NET**
-```toml
-name = "background-worker"
-[process]
-executable = "C:\\Apps\\Worker\\Worker.exe"
-arguments = "--environment Production"
-working_directory = "C:\\Apps\\Worker"
-[logging]
-level = "Warning"
-log_file = "C:\\Logs\\worker.log"
-log_to_console = false
-[restart]
-policy = "OnFailure"
-```
+## Features
 
-## Architecture
+✅ Any executable as Windows Service  
+✅ Auto-restart policies  
+✅ Rich logging with file rotation  
+✅ Environment variables  
+✅ UAC elevation handling  
+✅ TOML configuration  
 
-- **Core** – Config loading, process management, Windows service integration
-- **CLI** – Command interface
-- **Service Layer** – Background service/process runner
-- **Config Loader** – TOML parsing and validation
-
-## Status
-
-- **Done:** TOML config, CLI, process runner, Windows service, logging, metrics, alerting, performance monitoring
-- **In Progress:** Service-mode process management, log viewing, error handling
-- **Planned:** Health checks, dependency management, web UI, PowerShell module
-
-## Requirements
+## Development Requirements 
 
 - Windows 10/Server 2016+
-- .NET 8.0 Runtime
-- Administrator privileges (for install)
+- .NET 8.0 SDK (for building)
+- Administrator privileges (for service operations)
+
+## Runtime Requirements
+
+- Windows 10/Server 2016+ (64-bit)
+- Administrator privileges (for service operations)
+
+## Roadmap
+
+🚧 **Planned Features:**
+
+### Monitoring & Observability
+- [ ] Prometheus scrapable metrics (CPU, memory, restarts, uptime)
+- [ ] Structured logging with JSON output
+- [ ] Health check endpoints
+- [ ] Performance counters integration
+
+### Extensibility & Automation  
+- [ ] Plugin system for custom rules and hooks
+- [ ] Auto-discovery of common application types
+- [ ] Template-based configuration generation
+- [ ] Hot-reload configuration changes
+- Other QoL features & improvements
+
+### Enhanced Service Management
+- [ ] Bulk service operations (start/stop multiple services)
+- [ ] Service dependency management
+- [ ] Rolling updates and blue-green deployments
+- [ ] Backup and restore service configurations
+- [ ] Extend Log lifecycle management
+
+### Maintenance
+- [ ] Automatic log rotation and cleanup
+- [ ] Resource usage optimization
+- [ ] Memory leak detection and recovery
+- [ ] Dead service cleanup utilities
+
+### AI-Powered Features
+- TBD
+
+### Developer Experience
+- [ ] Web dashboard for service management
+- [ ] PowerShell module with cmdlets
+- [ ] VS Code extension for config editing
+- [ ] CI/CD pipeline templates
 
 ## License
 
-[MIT License](LICENSE)
-
-## Comparison
-
-| Feature                | WinLet | WinSW | NSSM |
-|------------------------|--------|-------|------|
-| Config Format          | TOML   | XML   | GUI/Registry |
-| CLI                    | Modern | Basic | GUI   |
-| Prometheus Metrics     | ✅     | ❌    | ❌    |
-| Alerting               | ✅     | ❌    | ❌    |
-| Performance Monitoring | ✅     | ❌    | ❌    |
-| Health Checks          | Planned| ❌    | ❌    |
-| Logging                | Advanced| Basic| Basic |
-| Service Accounts       | Full   | Basic | Basic |
-
-**Advantages:**  
-- Built-in observability (metrics, alerting)  
-- Modern config (TOML)  
-- CLI-first, developer-friendly  
-- Real-time metrics and notifications  
+MIT License
