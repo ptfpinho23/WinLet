@@ -12,6 +12,9 @@ class Program
     [SupportedOSPlatform("windows")]
     static async Task<int> Main(string[] args)
     {
+        // Convert relative config paths to absolute paths before UAC elevation
+        args = ConvertConfigPathsToAbsolute(args);
+        
         // Check for UAC elevation requirement for admin operations
         // But skip elevation for help commands
         if (args.Length > 0 && 
@@ -72,6 +75,7 @@ class Program
                 }
 
                 Console.WriteLine($"Running with administrator privileges");
+                Console.WriteLine($"Working directory: {Environment.CurrentDirectory}");
                 Console.WriteLine($"Loading configuration from: {configPath}");
                 
                 if (!File.Exists(configPath))
@@ -402,5 +406,32 @@ class Program
         var logger = serviceProvider.GetRequiredService<ILogger<WindowsServiceManager>>();
         
         return new WindowsServiceManager(logger);
+    }
+
+    /// <summary>
+    /// Convert relative config file paths to absolute paths in command line arguments
+    /// </summary>
+    /// <param name="args">Original command line arguments</param>
+    /// <returns>Arguments with absolute config paths</returns>
+    private static string[] ConvertConfigPathsToAbsolute(string[] args)
+    {
+        var result = new List<string>();
+        
+        for (int i = 0; i < args.Length; i++)
+        {
+            result.Add(args[i]);
+            
+            // Check if this is a --config argument and we have a next argument
+            if ((args[i] == "--config" || args[i] == "-c") && i + 1 < args.Length)
+            {
+                // Convert the config path to absolute
+                var configPath = args[i + 1];
+                var absolutePath = Path.GetFullPath(configPath);
+                result.Add(absolutePath);
+                i++; // Skip the next argument since we've processed it
+            }
+        }
+        
+        return result.ToArray();
     }
 } 
