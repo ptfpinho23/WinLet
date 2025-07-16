@@ -130,6 +130,7 @@ working_directory = "C:\\Scripts"
 - [ ] Template-based configuration generation
 - [ ] Hot-reload configuration changes
 - Other QoL features & improvements
+- Verbosity levels
 
 ### Enhanced Service Management
 - [ ] Bulk service operations (start/stop multiple services)
