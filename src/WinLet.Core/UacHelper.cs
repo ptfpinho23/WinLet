@@ -51,6 +51,8 @@ public static class UacHelper
 
             Console.WriteLine("🔒 Administrator privileges required for this operation.");
             Console.WriteLine("   Requesting elevation...");
+            Console.WriteLine($"   Process: {currentProcess}");
+            Console.WriteLine($"   Arguments: [{string.Join(", ", args)}]");
             
             // Properly escape arguments for command line
             var escapedArgs = args.Select(arg => 
@@ -64,6 +66,7 @@ public static class UacHelper
             });
             
             var arguments = string.Join(" ", escapedArgs);
+            Console.WriteLine($"   Escaped arguments: {arguments}");
             
             // Create process start info with runas verb for UAC elevation
             var startInfo = new ProcessStartInfo
@@ -71,16 +74,24 @@ public static class UacHelper
                 FileName = currentProcess,
                 Arguments = arguments,
                 UseShellExecute = true,
-                Verb = "runas" // This triggers UAC elevation
+                Verb = "runas", // This triggers UAC elevation
+                WindowStyle = ProcessWindowStyle.Normal
             };
 
+            Console.WriteLine("   Starting elevated process...");
+            
             // Start the elevated process
             using var elevatedProcess = Process.Start(startInfo);
             
             if (elevatedProcess != null)
             {
+                Console.WriteLine($"   Elevated process started with PID: {elevatedProcess.Id}");
+                Console.WriteLine("   Waiting for elevated process to complete...");
+                
                 // Wait for the elevated process to complete
                 elevatedProcess.WaitForExit();
+                
+                Console.WriteLine($"   Elevated process exited with code: {elevatedProcess.ExitCode}");
                 
                 // Exit with the same code as the elevated process
                 Environment.Exit(elevatedProcess.ExitCode);
@@ -97,9 +108,20 @@ public static class UacHelper
             Console.WriteLine("❌ Operation cancelled by user (UAC prompt declined)");
             Environment.Exit(1);
         }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            // Other Win32 errors
+            Console.WriteLine($"❌ Windows system error during elevation: {ex.Message} (Error code: {ex.NativeErrorCode})");
+            Environment.Exit(1);
+        }
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Failed to elevate privileges: {ex.Message}");
+            Console.WriteLine($"   Exception type: {ex.GetType().Name}");
+            if (ex.InnerException != null)
+            {
+                Console.WriteLine($"   Inner exception: {ex.InnerException.Message}");
+            }
             Environment.Exit(1);
         }
 

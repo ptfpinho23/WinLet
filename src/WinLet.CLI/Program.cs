@@ -73,15 +73,22 @@ class Program
                 var serviceManager = CreateServiceManager();
                 
                 // Get the WinLet.Service executable path (should be alongside the CLI)
-                var serviceExePath = Path.Combine(AppContext.BaseDirectory, "WinLetService.exe");
+                var serviceExePath = Path.Combine(AppContext.BaseDirectory, "service", "WinLetService.exe");
                 if (!File.Exists(serviceExePath))
                 {
                     // Try looking in the same directory as the CLI
-                    serviceExePath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath) ?? "", "WinLetService.exe");
+                    serviceExePath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath) ?? "", "service", "WinLetService.exe");
+                }
+                
+                if (!File.Exists(serviceExePath))
+                {
+                    Console.WriteLine("❌ Error: WinLetService.exe not found. Please ensure the service is built and published.");
+                    Console.WriteLine($"   Expected location: {serviceExePath}");
+                    Environment.Exit(1);
                 }
                 
                 Console.WriteLine($"Installing service: {config.Name}");
-                await serviceManager.InstallServiceAsync(config, serviceExePath);
+                await serviceManager.InstallServiceAsync(config, serviceExePath, configPath);
                 Console.WriteLine($"✅ Service '{config.Name}' installed successfully!");
                 Console.WriteLine($"   Display Name: {config.DisplayName}");
                 if (!string.IsNullOrEmpty(config.Description))

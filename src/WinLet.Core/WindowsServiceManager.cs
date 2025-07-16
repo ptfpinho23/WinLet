@@ -24,7 +24,8 @@ public class WindowsServiceManager
     /// </summary>
     /// <param name="config">Service configuration</param>
     /// <param name="executablePath">Path to the WinLet executable</param>
-    public async Task InstallServiceAsync(ServiceConfig config, string executablePath)
+    /// <param name="sourceConfigPath">Path to the original config file</param>
+    public async Task InstallServiceAsync(ServiceConfig config, string executablePath, string? sourceConfigPath = null)
     {
         _logger.LogInformation("Installing Windows service: {ServiceName}", config.Name);
 
@@ -37,7 +38,7 @@ public class WindowsServiceManager
             }
 
             // Build sc.exe command to create service
-            var arguments = BuildCreateServiceArguments(config, executablePath);
+            var arguments = BuildCreateServiceArguments(config, executablePath, sourceConfigPath);
             
             var result = await RunServiceControlCommand("create", arguments);
             if (result.ExitCode != 0)
@@ -197,12 +198,30 @@ public class WindowsServiceManager
         return status.HasValue;
     }
 
-    private string BuildCreateServiceArguments(ServiceConfig config, string executablePath)
+    private string BuildCreateServiceArguments(ServiceConfig config, string executablePath, string? sourceConfigPath = null)
     {
+        // We need to pass the config file path to the service so it knows what to run
+        // Store the config file path in a predictable location for the service to find
+        var configDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WinLet");
+        Directory.CreateDirectory(configDir);
+        
+        var serviceConfigPath = Path.Combine(configDir, $"{config.Name}.toml");
+        
+        // Copy the original config file to the service config location if provided
+        if (!string.IsNullOrEmpty(sourceConfigPath) && File.Exists(sourceConfigPath))
+        {
+            _logger.LogInformation("Copying config from {SourcePath} to {DestPath}", sourceConfigPath, serviceConfigPath);
+            File.Copy(sourceConfigPath, serviceConfigPath, overwrite: true);
+        }
+        else
+        {
+            _logger.LogWarning("No source config path provided or file doesn't exist. Service may not start properly.");
+        }
+        
         var arguments = new List<string>
         {
             config.Name,
-            $"binPath= \"{executablePath} --service\"",
+            $"binPath= \"{executablePath} --config-path \\\"{serviceConfigPath}\\\"\"",
             $"DisplayName= \"{config.DisplayName}\"",
             "start= auto",
             "type= own"
