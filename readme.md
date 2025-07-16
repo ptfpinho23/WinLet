@@ -14,7 +14,7 @@
 
 ### 1. Build WinLet
 ```powershell
-git clone https://github.com/your-repo/WinLet.git
+git clone https://github.com/ptfpinho23/WinLet.git
 cd WinLet
 .\build.ps1
 
