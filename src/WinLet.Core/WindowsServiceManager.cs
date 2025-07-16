@@ -28,28 +28,41 @@ public class WindowsServiceManager
     public async Task InstallServiceAsync(ServiceConfig config, string executablePath, string? sourceConfigPath = null)
     {
         _logger.LogInformation("Installing Windows service: {ServiceName}", config.Name);
+        Console.WriteLine($"Checking if service '{config.Name}' already exists...");
 
         try
         {
             // Check if service already exists
             if (await ServiceExistsAsync(config.Name))
             {
+                Console.WriteLine($"Service '{config.Name}' already exists!");
                 throw new InvalidOperationException($"Service '{config.Name}' already exists");
             }
+
+            Console.WriteLine($"Service name is available");
+            Console.WriteLine($"Building service installation command...");
 
             // Build sc.exe command to create service
             var arguments = BuildCreateServiceArguments(config, executablePath, sourceConfigPath);
             
+            Console.WriteLine($"Running: sc.exe create {arguments}");
             var result = await RunServiceControlCommand("create", arguments);
+            
+            Console.WriteLine($"sc.exe output: {result.Output}");
+            Console.WriteLine($"sc.exe exit code: {result.ExitCode}");
+            
             if (result.ExitCode != 0)
             {
+                Console.WriteLine($"Service creation failed!");
                 throw new InvalidOperationException($"Failed to create service: {result.Output}");
             }
 
+            Console.WriteLine($"Service created successfully");
             _logger.LogInformation("Service '{ServiceName}' installed successfully", config.Name);
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"Installation failed: {ex.Message}");
             _logger.LogError(ex, "Failed to install service: {ServiceName}", config.Name);
             throw;
         }
