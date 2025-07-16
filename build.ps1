@@ -26,5 +26,11 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# Copy executable to convenient location
+Write-Host "Copying executable to bin folder..." -ForegroundColor Yellow
+New-Item -ItemType Directory -Force -Path "bin" | Out-Null
+Copy-Item "src\WinLet.CLI\bin\Release\net8.0\win-x64\publish\WinLet.exe" "bin\WinLet.exe" -Force
+Copy-Item "src\WinLet.CLI\bin\Release\net8.0\win-x64\publish\*.dll" "bin\" -Force
+
 Write-Host "Build completed successfully!" -ForegroundColor Green
-Write-Host "WinLet.exe is available at: src\WinLet.CLI\bin\Release\net8.0\win-x64\publish\WinLet.exe" -ForegroundColor White 
+Write-Host "WinLet.exe is available at: .\bin\WinLet.exe" -ForegroundColor White 
