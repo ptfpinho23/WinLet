@@ -10,9 +10,9 @@
     <!-- Assembly info -->
     <AssemblyTitle>WinLet - Windows Service Manager</AssemblyTitle>
     <AssemblyDescription>Modern Windows Service Manager with TOML configuration</AssemblyDescription>
-    <AssemblyCompany>Your Name</AssemblyCompany>
+    <AssemblyCompany>Winlet</AssemblyCompany>
     <AssemblyProduct>WinLet</AssemblyProduct>
-    <AssemblyCopyright>Copyright © Your Name 2024</AssemblyCopyright>
+    <AssemblyCopyright>-</AssemblyCopyright>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
     <InformationalVersion>1.0.0</InformationalVersion>
