@@ -86,31 +86,31 @@ public static class UacHelper
                 // Exit with the same code as the elevated process
                 if (elevatedProcess.ExitCode != 0)
                 {
-                    Console.WriteLine($"❌ Operation failed (exit code: {elevatedProcess.ExitCode})");
+                    Console.WriteLine($"Operation failed (exit code: {elevatedProcess.ExitCode})");
                 }
                 Environment.Exit(elevatedProcess.ExitCode);
             }
             else
             {
-                Console.WriteLine("❌ Failed to start elevated process");
+                Console.WriteLine("Failed to start elevated process");
                 Environment.Exit(1);
             }
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
             // User cancelled the UAC prompt
-            Console.WriteLine("❌ Operation cancelled by user");
+            Console.WriteLine("Operation cancelled by user");
             Environment.Exit(1);
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
             // Other Win32 errors
-            Console.WriteLine($"❌ Elevation failed: {ex.Message}");
+            Console.WriteLine($"Elevation failed: {ex.Message}");
             Environment.Exit(1);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"❌ Failed to elevate privileges: {ex.Message}");
+            Console.WriteLine($"Failed to elevate privileges: {ex.Message}");
             Environment.Exit(1);
         }
 

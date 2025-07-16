@@ -358,7 +358,7 @@ class Program
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Error: {ex.Message}");
+                Console.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
         }, nameOption);
@@ -386,7 +386,7 @@ class Program
         command.SetHandler(async (string serviceName, int tailLines) =>
         {
             // For now, this is a placeholder - we'd need to implement log reading
-            Console.WriteLine($"📋 Logs for service: {serviceName} (last {tailLines} lines)");
+            Console.WriteLine($"Logs for service: {serviceName} (last {tailLines} lines)");
             Console.WriteLine("Log viewing functionality will be implemented based on logging configuration");
             await Task.CompletedTask;
         }, nameOption, tailOption);
