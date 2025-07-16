@@ -31,10 +31,8 @@ public class ProcessRunner : IDisposable
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         
-        // Create logger factory for LogManager
-        var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
-        var logManagerLogger = loggerFactory.CreateLogger<LogManager>();
-        
+        // Create a simple logger for LogManager - we'll use a basic console logger
+        var logManagerLogger = new ConsoleLogger<LogManager>();
         _logManager = new LogManager(config.Logging, config.Name, logManagerLogger);
     }
 
@@ -271,7 +269,7 @@ public class ProcessRunner : IDisposable
             await _logManager.WriteStdoutAsync(timestampedOutput);
             
             // Also log to WinLet service log for debugging (but less verbose)
-            if (_logger.IsEnabled(LogLevel.Debug))
+            if (_logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug))
             {
                 _logger.LogDebug("App stdout: {Output}", e.Data);
             }
@@ -311,6 +309,25 @@ public class ProcessRunner : IDisposable
         _cancellationTokenSource.Dispose();
         
         _disposed = true;
+    }
+}
+
+/// <summary>
+/// Simple console logger implementation for LogManager
+/// </summary>
+internal class ConsoleLogger<T> : ILogger<T>
+{
+    public IDisposable BeginScope<TState>(TState state) => null!;
+    public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+    
+    public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        var message = formatter(state, exception);
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [{logLevel}] [LogManager] {message}");
+        if (exception != null)
+        {
+            Console.WriteLine(exception.ToString());
+        }
     }
 }
 
