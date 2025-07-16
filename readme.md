@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="winlet.png" alt="WinLet Logo" width="128" height="128">
-
 # WinLet
 
 **Modern Windows Service Manager**
