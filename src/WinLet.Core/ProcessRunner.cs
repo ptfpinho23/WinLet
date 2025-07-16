@@ -72,8 +72,8 @@ public class ProcessRunner : IDisposable
             StartTime = DateTime.UtcNow;
             _logger.LogInformation("Process started with PID: {ProcessId}", _process.Id);
             
-            // Log to WinLet service log
-            await _logManager.LogAsync($"🚀 Process started: {_config.Process.Executable} (PID: {_process.Id})", LogLevel.Information);
+            // Log to WinLet service log (using regular ILogger)
+            _logger.LogInformation("🚀 Process started: {Executable} (PID: {ProcessId})", _config.Process.Executable, _process.Id);
             
             ProcessStarted?.Invoke(this, new ProcessEventArgs(_process.Id, StartTime.Value));
 
@@ -101,8 +101,8 @@ public class ProcessRunner : IDisposable
 
         _logger.LogInformation("Stopping process with PID: {ProcessId}", _process.Id);
         
-        // Log to WinLet service log
-        await _logManager.LogAsync($"🛑 Stopping process: {_config.Process.Executable} (PID: {_process.Id})", LogLevel.Information);
+        // Log to WinLet service log (using regular ILogger)
+        _logger.LogInformation("🛑 Stopping process: {Executable} (PID: {ProcessId})", _config.Process.Executable, _process.Id);
 
         try
         {
@@ -178,8 +178,8 @@ public class ProcessRunner : IDisposable
                     
                     _logger.LogWarning("Process exited with code: {ExitCode}", exitCode);
                     
-                    // Log to WinLet service log
-                    await _logManager.LogAsync($"❌ Process exited: {_config.Process.Executable} (PID: {_process.Id}, Exit Code: {exitCode})", LogLevel.Warning);
+                    // Log to WinLet service log (using regular ILogger)
+                    _logger.LogWarning("❌ Process exited: {Executable} (PID: {ProcessId}, Exit Code: {ExitCode})", _config.Process.Executable, _process.Id, exitCode);
                     
                     ProcessStopped?.Invoke(this, new ProcessEventArgs(_process.Id, exitTime, exitCode));
 
@@ -189,12 +189,12 @@ public class ProcessRunner : IDisposable
                         
                         if (ShouldRestart())
                         {
-                            await _logManager.LogAsync($"🔄 Scheduling restart for: {_config.Process.Executable}", LogLevel.Information);
+                            _logger.LogInformation("🔄 Scheduling restart for: {Executable}", _config.Process.Executable);
                             await HandleRestartAsync(cancellationToken);
                         }
                         else
                         {
-                            await _logManager.LogAsync($"⛔ Maximum restart attempts reached for: {_config.Process.Executable}", LogLevel.Error);
+                            _logger.LogError("⛔ Maximum restart attempts reached for: {Executable}", _config.Process.Executable);
                         }
                     }
                     break;
@@ -241,8 +241,8 @@ public class ProcessRunner : IDisposable
         _logger.LogInformation("Restarting process (attempt {Attempt}/{MaxAttempts})", 
             _restartAttempts, _config.Restart.MaxAttempts);
 
-        // Log to WinLet service log
-        await _logManager.LogAsync($"🔄 Restarting process: {_config.Process.Executable} (attempt {_restartAttempts}/{_config.Restart.MaxAttempts})", LogLevel.Information);
+        // Log to WinLet service log (using regular ILogger)
+        _logger.LogInformation("🔄 Restarting process: {Executable} (attempt {Attempt}/{MaxAttempts})", _config.Process.Executable, _restartAttempts, _config.Restart.MaxAttempts);
 
         await Task.Delay(TimeSpan.FromSeconds(_config.Restart.DelaySeconds), cancellationToken);
 
@@ -266,11 +266,15 @@ public class ProcessRunner : IDisposable
     {
         if (!string.IsNullOrEmpty(e.Data))
         {
-            // Write application stdout to application log
-            await _logManager.LogAsync($"[STDOUT] {e.Data}", LogLevel.Information);
+            // Write application stdout to application log file with timestamp
+            var timestampedOutput = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {e.Data}\n";
+            await _logManager.WriteStdoutAsync(timestampedOutput);
             
-            // Also log to WinLet service log for debugging
-            _logger.LogDebug("App stdout: {Output}", e.Data);
+            // Also log to WinLet service log for debugging (but less verbose)
+            if (_logger.IsEnabled(LogLevel.Debug))
+            {
+                _logger.LogDebug("App stdout: {Output}", e.Data);
+            }
         }
     }
 
@@ -278,10 +282,11 @@ public class ProcessRunner : IDisposable
     {
         if (!string.IsNullOrEmpty(e.Data))
         {
-            // Write application stderr to application log
-            await _logManager.LogAsync($"[STDERR] {e.Data}", LogLevel.Error);
+            // Write application stderr to application log file with timestamp
+            var timestampedError = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [ERROR] {e.Data}\n";
+            await _logManager.WriteStderrAsync(timestampedError);
             
-            // Also log to WinLet service log
+            // Also log to WinLet service log (always log errors)
             _logger.LogWarning("App stderr: {Error}", e.Data);
         }
     }
