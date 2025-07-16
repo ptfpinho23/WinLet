@@ -68,11 +68,11 @@ public static class UacHelper
             // Create process start info with runas verb for UAC elevation
             var startInfo = new ProcessStartInfo
             {
-                FileName = currentProcess,
-                Arguments = arguments,
+                FileName = "cmd.exe",
+                Arguments = $"/c \"\"{currentProcess}\" {arguments} & pause & exit\"",
                 UseShellExecute = true,
                 Verb = "runas", // This triggers UAC elevation
-                WindowStyle = ProcessWindowStyle.Hidden
+                WindowStyle = ProcessWindowStyle.Normal
             };
             
             // Start the elevated process
@@ -83,11 +83,16 @@ public static class UacHelper
                 // Wait for the elevated process to complete
                 elevatedProcess.WaitForExit();
                 
-                // Exit with the same code as the elevated process
-                if (elevatedProcess.ExitCode != 0)
+                // Show completion message
+                if (elevatedProcess.ExitCode == 0)
+                {
+                    Console.WriteLine("Operation completed successfully!");
+                }
+                else
                 {
                     Console.WriteLine($"Operation failed (exit code: {elevatedProcess.ExitCode})");
                 }
+                
                 Environment.Exit(elevatedProcess.ExitCode);
             }
             else

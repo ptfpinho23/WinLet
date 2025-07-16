@@ -120,6 +120,7 @@ working_directory = "C:\\Scripts"
 
 ### Monitoring & Observability
 - [ ] Prometheus scrapable metrics (CPU, memory, restarts, uptime)
+- [ ] Windows Monitoring Native API Integrations
 - [ ] Structured logging with JSON output
 - [ ] Health check endpoints
 - [ ] Performance counters integration
@@ -131,6 +132,7 @@ working_directory = "C:\\Scripts"
 - [ ] Hot-reload configuration changes
 - Other QoL features & improvements
 - Verbosity levels
+- Add TOML generator
 
 ### Enhanced Service Management
 - [ ] Bulk service operations (start/stop multiple services)
@@ -141,14 +143,8 @@ working_directory = "C:\\Scripts"
 
 ### Maintenance
 - [ ] Automatic log rotation and cleanup
-- [ ] Resource usage optimization
-- [ ] Memory leak detection and recovery
-- [ ] Dead service cleanup utilities
 
-### AI-Powered Features
-- TBD
-
-### Developer Experience
+### Dev Experience
 - [ ] Web dashboard for service management
 - [ ] PowerShell module with cmdlets
 - [ ] VS Code extension for config editing

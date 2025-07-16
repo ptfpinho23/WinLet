@@ -92,28 +92,10 @@ class Program
                 
                 var serviceManager = CreateServiceManager();
                 
-                // Get the WinLet.Service executable path
-                var serviceExePath = Path.Combine(AppContext.BaseDirectory, "service", "WinLetService.exe");
+                // Get the WinLet.Service executable path (should be in service subfolder)
+                var basePath = Path.GetDirectoryName(Environment.ProcessPath) ?? "";
+                var serviceExePath = Path.Combine(basePath, "service", "WinLetService.exe");
                 Console.WriteLine($"Looking for WinLetService.exe at: {serviceExePath}");
-                
-                if (!File.Exists(serviceExePath))
-                {
-                    // Try looking in the CLI bin directory
-                    var cliDir = Path.GetDirectoryName(Environment.ProcessPath) ?? "";
-                    serviceExePath = Path.Combine(cliDir, "service", "WinLetService.exe");
-                    Console.WriteLine($"Trying alternative location: {serviceExePath}");
-                }
-                
-                if (!File.Exists(serviceExePath))
-                {
-                    // Try looking in the build output directory (for development)
-                    var projectRoot = FindProjectRoot();
-                    if (!string.IsNullOrEmpty(projectRoot))
-                    {
-                        serviceExePath = Path.Combine(projectRoot, "src", "WinLet.CLI", "bin", "Release", "net8.0", "service", "WinLetService.exe");
-                        Console.WriteLine($"Trying development location: {serviceExePath}");
-                    }
-                }
                 
                 if (!File.Exists(serviceExePath))
                 {
@@ -445,38 +427,5 @@ class Program
         }
         
         return result.ToArray();
-    }
-
-    /// <summary>
-    /// Find the project root directory by looking for the .sln file
-    /// </summary>
-    /// <returns>Project root path or null if not found</returns>
-    private static string? FindProjectRoot()
-    {
-        var currentDir = Environment.CurrentDirectory;
-        var processDir = Path.GetDirectoryName(Environment.ProcessPath);
-        
-        // Try current directory first
-        var dir = new DirectoryInfo(currentDir);
-        while (dir != null)
-        {
-            if (dir.GetFiles("*.sln").Any())
-                return dir.FullName;
-            dir = dir.Parent;
-        }
-        
-        // Try process directory
-        if (!string.IsNullOrEmpty(processDir))
-        {
-            dir = new DirectoryInfo(processDir);
-            while (dir != null)
-            {
-                if (dir.GetFiles("*.sln").Any())
-                    return dir.FullName;
-                dir = dir.Parent;
-            }
-        }
-        
-        return null;
     }
 } 

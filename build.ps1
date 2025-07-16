@@ -32,5 +32,10 @@ New-Item -ItemType Directory -Force -Path "bin" | Out-Null
 Copy-Item "src\WinLet.CLI\bin\Release\net8.0\win-x64\publish\WinLet.exe" "bin\WinLet.exe" -Force
 Copy-Item "src\WinLet.CLI\bin\Release\net8.0\win-x64\publish\*.dll" "bin\" -Force
 
+# Copy service files to service subfolder
+Write-Host "Copying service files..." -ForegroundColor Yellow
+New-Item -ItemType Directory -Force -Path "bin\service" | Out-Null
+Copy-Item "src\WinLet.CLI\bin\Release\net8.0\service\*" "bin\service\" -Recurse -Force
+
 Write-Host "Build completed successfully!" -ForegroundColor Green
 Write-Host "WinLet.exe is available at: .\bin\WinLet.exe" -ForegroundColor White 
