@@ -108,12 +108,9 @@ cd WinLet
 .\clean.ps1
 ```
 
-The build script creates a self-contained deployment in the `bin/` folder that doesn't require .NET to be installed on target machines.
-
 ### Runtime Requirements (End Users)
 - Windows 10/Server 2016+ (64-bit)
 - Administrator privileges (for service operations)
-- No .NET installation required (self-contained)
 
 ## Roadmap
 

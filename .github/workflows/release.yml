@@ -8,7 +8,22 @@ on:
 
 jobs:
   build-and-release:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          # Windows builds
+          - os: windows-latest
+            runtime: win-x64
+            archive_name: WinLet-win-x64
+            archive_format: zip
+            shell: pwsh
+          - os: windows-latest
+            runtime: win-arm64
+            archive_name: WinLet-win-arm64
+            archive_format: zip
+            shell: pwsh
+    
+    runs-on: ${{ matrix.os }}
     
     steps:
     - name: Checkout code
@@ -22,7 +37,8 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore WinLet.sln
       
-    - name: Build and publish
+    - name: Build and publish (Windows)
+      if: startsWith(matrix.runtime, 'win-')
       run: |
         # Create output directory
         New-Item -ItemType Directory -Force -Path "bin"
@@ -30,7 +46,7 @@ jobs:
         # Build CLI
         dotnet publish src/WinLet.CLI/WinLet.CLI.csproj `
           --configuration Release `
-          --runtime win-x64 `
+          --runtime ${{ matrix.runtime }} `
           --self-contained true `
           --output "bin/" `
           -p:PublishSingleFile=true `
@@ -40,7 +56,7 @@ jobs:
         # Build Service
         dotnet publish src/WinLet.Service/WinLet.Service.csproj `
           --configuration Release `
-          --runtime win-x64 `
+          --runtime ${{ matrix.runtime }} `
           --self-contained true `
           --output "bin/service/" `
           -p:PublishSingleFile=true `
@@ -55,18 +71,176 @@ jobs:
         Copy-Item CONFIGURATION.md bin/
       shell: pwsh
       
-    - name: Create release archive
+    - name: Build and publish (Linux/macOS)
+      if: startsWith(matrix.runtime, 'linux-') || startsWith(matrix.runtime, 'osx-')
       run: |
-        Compress-Archive -Path "bin/*" -DestinationPath "WinLet-win-x64.zip"
+        # Create output directory
+        mkdir -p bin
+        
+        # Build CLI
+        dotnet publish src/WinLet.CLI/WinLet.CLI.csproj \
+          --configuration Release \
+          --runtime ${{ matrix.runtime }} \
+          --self-contained true \
+          --output "bin/" \
+          -p:PublishSingleFile=true \
+          -p:IncludeNativeLibrariesForSelfExtract=true \
+          -p:PublishTrimmed=false
+          
+        # Build Service (note: limited functionality on non-Windows)
+        dotnet publish src/WinLet.Service/WinLet.Service.csproj \
+          --configuration Release \
+          --runtime ${{ matrix.runtime }} \
+          --self-contained true \
+          --output "bin/service/" \
+          -p:PublishSingleFile=true \
+          -p:IncludeNativeLibrariesForSelfExtract=true \
+          -p:PublishTrimmed=false
+          
+        # Copy examples and docs
+        cp -r examples bin/
+        cp readme.md bin/
+        cp CONFIGURATION.md bin/
+        
+        # Add platform warning
+        echo "⚠️ WARNING: This is a Linux/macOS build of WinLet." > bin/PLATFORM_WARNING.txt
+        echo "WinLet is designed for Windows Services and has limited functionality on this platform." >> bin/PLATFORM_WARNING.txt
+        echo "Most service management features will not work outside of Windows." >> bin/PLATFORM_WARNING.txt
+      shell: bash
+      
+    - name: Create ZIP archive (Windows)
+      if: matrix.archive_format == 'zip'
+      run: |
+        Compress-Archive -Path "bin/*" -DestinationPath "${{ matrix.archive_name }}.zip"
       shell: pwsh
       
-    - name: Get tag name
+          - name: Create TAR.GZ archive (Linux/macOS)
+        if: matrix.archive_format == 'tar.gz'
+        run: |
+          tar -czf "${{ matrix.archive_name }}.tar.gz" -C bin .
+        shell: bash
+        
+      - name: Create DEB package (Linux x64 only)
+        if: matrix.runtime == 'linux-x64'
+        run: |
+          # Create DEB package structure
+          mkdir -p deb-package/DEBIAN
+          mkdir -p deb-package/usr/local/bin/winlet
+          mkdir -p deb-package/usr/local/share/winlet
+          mkdir -p deb-package/usr/share/doc/winlet
+          
+          # Copy binaries
+          cp -r bin/* deb-package/usr/local/share/winlet/
+          
+          # Create symlink for CLI
+          ln -sf /usr/local/share/winlet/WinLet deb-package/usr/local/bin/winlet
+          
+          # Create control file
+          cat > deb-package/DEBIAN/control << 'EOF'
+          Package: winlet
+          Version: ${{ github.ref_name }}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: WinLet Project
+          Description: Windows Service wrapper for any application
+           WinLet allows you to wrap any application as a Windows Service
+           using simple TOML configuration. Note: Limited functionality on Linux.
+          Homepage: https://github.com/ptfpinho23/WinLet
+          EOF
+          
+          # Create postinst script
+          cat > deb-package/DEBIAN/postinst << 'EOF'
+          #!/bin/bash
+          chmod +x /usr/local/share/winlet/WinLet
+          chmod +x /usr/local/share/winlet/service/WinLetService
+          echo "⚠️  WARNING: WinLet has limited functionality on Linux."
+          echo "   Most Windows Service features will not work."
+          EOF
+          chmod 755 deb-package/DEBIAN/postinst
+          
+          # Build DEB package
+          dpkg-deb --build deb-package winlet-${{ github.ref_name }}-linux-amd64.deb
+        shell: bash
+        
+      - name: Create RPM package (Linux x64 only)
+        if: matrix.runtime == 'linux-x64'
+        run: |
+          # Install rpm tools
+          sudo apt-get update && sudo apt-get install -y rpm
+          
+          # Create RPM spec file
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          
+          cat > ~/rpmbuild/SPECS/winlet.spec << 'EOF'
+          Name:           winlet
+          Version:        ${GITHUB_REF_NAME#v}
+          Release:        1%{?dist}
+          Summary:        Windows Service wrapper for any application
+          License:        MIT
+          URL:            https://github.com/ptfpinho23/WinLet
+          BuildArch:      x86_64
+          
+          %description
+          WinLet allows you to wrap any application as a Windows Service
+          using simple TOML configuration. Note: Limited functionality on Linux.
+          
+          %install
+          mkdir -p %{buildroot}/usr/local/share/winlet
+          mkdir -p %{buildroot}/usr/local/bin
+          cp -r %{_builddir}/../bin/* %{buildroot}/usr/local/share/winlet/
+          ln -sf /usr/local/share/winlet/WinLet %{buildroot}/usr/local/bin/winlet
+          
+          %files
+          /usr/local/share/winlet/*
+          /usr/local/bin/winlet
+          
+          %post
+          chmod +x /usr/local/share/winlet/WinLet
+          chmod +x /usr/local/share/winlet/service/WinLetService
+          echo "⚠️  WARNING: WinLet has limited functionality on Linux."
+          echo "   Most Windows Service features will not work."
+          
+          %changelog
+          * $(date +'%a %b %d %Y') WinLet Project - ${GITHUB_REF_NAME#v}-1
+          - Release ${GITHUB_REF_NAME}
+          EOF
+          
+          # Copy source files
+          cp -r bin ~/rpmbuild/BUILD/
+          
+          # Build RPM
+          rpmbuild -bb ~/rpmbuild/SPECS/winlet.spec
+          cp ~/rpmbuild/RPMS/x86_64/*.rpm .
+        shell: bash
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}
+          path: |
+            ${{ matrix.archive_name }}.*
+            *.deb
+            *.rpm
+          retention-days: 1
+          
+  create-release:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        
+    - name: Get tag name  
       id: tag
       run: |
-        $tagName = $env:GITHUB_REF -replace 'refs/tags/', ''
-        echo "tag_name=$tagName" >> $env:GITHUB_OUTPUT
-      shell: pwsh
-      
+        echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
@@ -74,26 +248,62 @@ jobs:
         name: WinLet ${{ steps.tag.outputs.tag_name }}
         draft: false
         prerelease: ${{ contains(steps.tag.outputs.tag_name, '-') }}
-        files: |
-          WinLet-win-x64.zip
+        files: artifacts/**/WinLet-*
         body: |
           ## WinLet ${{ steps.tag.outputs.tag_name }}
           
+          ### Windows (Recommended) 🪟
+          - **WinLet-win-x64.zip** - Windows 64-bit (Intel/AMD)
+          - **WinLet-win-arm64.zip** - Windows ARM64 (Surface Pro X, etc.)
+          
+          ### Linux (Limited Functionality) 🐧
+          - **WinLet-linux-x64.tar.gz** - Linux 64-bit (Intel/AMD)
+          - **WinLet-linux-arm64.tar.gz** - Linux ARM64 (Raspberry Pi, etc.)
+          - **winlet-${{ steps.tag.outputs.tag_name }}-linux-amd64.deb** - Debian/Ubuntu package
+          - **winlet-*.rpm** - Red Hat/Fedora/CentOS package
+          
+          ### macOS (Limited Functionality) 🍎
+          - **WinLet-macos-x64.tar.gz** - macOS Intel 64-bit
+          - **WinLet-macos-arm64.tar.gz** - macOS Apple Silicon (M1/M2/M3)
+          
           ### Installation
-          1. Download `WinLet-win-x64.zip`
-          2. Extract to your preferred location
+          
+          #### Windows (Full Features)
+          1. Download the appropriate Windows ZIP file
+          2. Extract to your preferred location  
           3. Run `WinLet.exe` with administrator privileges
+          4. Full Windows Service management capabilities
+          
+          #### Linux/macOS (Limited Features)
+          ```bash
+          # Debian/Ubuntu
+          sudo dpkg -i winlet-*.deb
+          
+          # Red Hat/Fedora
+          sudo rpm -i winlet-*.rpm
+          
+          # Manual installation (any distro)
+          tar -xzf WinLet-linux-x64.tar.gz
+          sudo cp WinLet /usr/local/bin/winlet
+          ```
+          
+          **⚠️ Linux/macOS Limitations:**
+          - No Windows Service management
+          - Process wrapping only
+          - Limited logging features
+          - No UAC elevation
           
           ### What's Included
-          - `WinLet.exe` - Main CLI tool
-          - `service/` - Service runtime files
+          - `WinLet(.exe)` - Main CLI tool
+          - `service/` - Service runtime files  
           - `examples/` - Configuration examples
           - `readme.md` - Quick start guide
           - `CONFIGURATION.md` - Complete configuration reference
           
           ### System Requirements
-          - Windows 10/Server 2016+ (64-bit)
-          - Administrator privileges (for service operations)
+          - **Windows:** 10/Server 2016+ (64-bit), Administrator privileges
+          - **Linux:** glibc 2.17+ (CentOS 7+, Ubuntu 18.04+, Debian 9+)
+          - **macOS:** 10.15+ (Catalina or newer)
           - No .NET installation required (self-contained)
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
