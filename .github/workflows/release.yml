@@ -1,0 +1,97 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+        
+    - name: Restore dependencies
+      run: dotnet restore WinLet.sln
+      
+    - name: Build and publish
+      run: |
+        # Create output directory
+        New-Item -ItemType Directory -Force -Path "bin"
+        
+        # Build CLI
+        dotnet publish src/WinLet.CLI/WinLet.CLI.csproj `
+          --configuration Release `
+          --runtime win-x64 `
+          --self-contained true `
+          --output "bin/" `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:PublishTrimmed=false
+          
+        # Build Service
+        dotnet publish src/WinLet.Service/WinLet.Service.csproj `
+          --configuration Release `
+          --runtime win-x64 `
+          --self-contained true `
+          --output "bin/service/" `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:PublishTrimmed=false
+          
+        # Copy examples
+        Copy-Item -Recurse examples bin/
+        
+        # Copy README
+        Copy-Item readme.md bin/
+      shell: pwsh
+      
+    - name: Create release archive
+      run: |
+        Compress-Archive -Path "bin/*" -DestinationPath "WinLet-win-x64.zip"
+      shell: pwsh
+      
+    - name: Get tag name
+      id: tag
+      run: |
+        $tagName = $env:GITHUB_REF -replace 'refs/tags/', ''
+        echo "tag_name=$tagName" >> $env:GITHUB_OUTPUT
+      shell: pwsh
+      
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag.outputs.tag_name }}
+        name: WinLet ${{ steps.tag.outputs.tag_name }}
+        draft: false
+        prerelease: ${{ contains(steps.tag.outputs.tag_name, '-') }}
+        files: |
+          WinLet-win-x64.zip
+        body: |
+          ## WinLet ${{ steps.tag.outputs.tag_name }}
+          
+          ### Installation
+          1. Download `WinLet-win-x64.zip`
+          2. Extract to your preferred location
+          3. Run `WinLet.exe` with administrator privileges
+          
+          ### What's Included
+          - `WinLet.exe` - Main CLI tool
+          - `service/` - Service runtime files
+          - `examples/` - Configuration examples
+          - `readme.md` - Documentation
+          
+          ### System Requirements
+          - Windows 10/Server 2016+ (64-bit)
+          - Administrator privileges (for service operations)
+          - No .NET installation required (self-contained)
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
