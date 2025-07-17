@@ -88,8 +88,8 @@ WinLet creates logs in your configured `log_path`:
 
 ✅ Any executable as Windows Service  
 ✅ Auto-restart policies  
-✅ Rich logging with timestamps  
-✅ Environment variables  
+✅ Logging Management  
+✅ Handle Env Variables 
 ✅ UAC elevation handling  
 ✅ TOML configuration  
 
