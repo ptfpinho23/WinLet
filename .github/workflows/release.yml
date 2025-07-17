@@ -91,11 +91,13 @@ jobs:
       id: tag
       run: |
         if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-          # Triggered by tag push
-          echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          # Triggered by tag push - extract tag name
+          TAG_NAME=$(echo "$GITHUB_REF" | sed 's|refs/tags/||')
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
         else
           # Triggered manually - use current date/time
-          echo "tag_name=manual-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+          MANUAL_TAG="manual-$(date +'%Y%m%d-%H%M%S')"
+          echo "tag_name=$MANUAL_TAG" >> $GITHUB_OUTPUT
         fi
         
           - name: Create Release
