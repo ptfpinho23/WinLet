@@ -50,8 +50,9 @@ jobs:
         # Copy examples
         Copy-Item -Recurse examples bin/
         
-        # Copy README
+        # Copy documentation
         Copy-Item readme.md bin/
+        Copy-Item CONFIGURATION.md bin/
       shell: pwsh
       
     - name: Create release archive
@@ -87,7 +88,8 @@ jobs:
           - `WinLet.exe` - Main CLI tool
           - `service/` - Service runtime files
           - `examples/` - Configuration examples
-          - `readme.md` - Documentation
+          - `readme.md` - Quick start guide
+          - `CONFIGURATION.md` - Complete configuration reference
           
           ### System Requirements
           - Windows 10/Server 2016+ (64-bit)
