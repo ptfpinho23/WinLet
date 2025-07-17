@@ -7,6 +7,16 @@
     <UserSecretsId>dotnet-WinLet-Service-7d44c50c-72e0-4869-9d9b-4f2336ee2fd4</UserSecretsId>
     <OutputType>Exe</OutputType>
     <AssemblyName>WinLetService</AssemblyName>
+    
+    <!-- Assembly info -->
+    <AssemblyTitle>WinLetService - Windows Service Host</AssemblyTitle>
+    <AssemblyDescription>WinLet Windows Service Host Process</AssemblyDescription>
+    <AssemblyCompany>WinLet</AssemblyCompany>
+    <AssemblyProduct>WinLet</AssemblyProduct>
+    <AssemblyCopyright>-</AssemblyCopyright>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

@@ -24,31 +24,45 @@ public class WindowsServiceManager
     /// </summary>
     /// <param name="config">Service configuration</param>
     /// <param name="executablePath">Path to the WinLet executable</param>
-    public async Task InstallServiceAsync(ServiceConfig config, string executablePath)
+    /// <param name="sourceConfigPath">Path to the original config file</param>
+    public async Task InstallServiceAsync(ServiceConfig config, string executablePath, string? sourceConfigPath = null)
     {
         _logger.LogInformation("Installing Windows service: {ServiceName}", config.Name);
+        Console.WriteLine($"Checking if service '{config.Name}' already exists...");
 
         try
         {
             // Check if service already exists
             if (await ServiceExistsAsync(config.Name))
             {
+                Console.WriteLine($"Service '{config.Name}' already exists!");
                 throw new InvalidOperationException($"Service '{config.Name}' already exists");
             }
 
+            Console.WriteLine($"Service name is available");
+            Console.WriteLine($"Building service installation command...");
+
             // Build sc.exe command to create service
-            var arguments = BuildCreateServiceArguments(config, executablePath);
+            var arguments = BuildCreateServiceArguments(config, executablePath, sourceConfigPath);
             
+            Console.WriteLine($"Running: sc.exe create {arguments}");
             var result = await RunServiceControlCommand("create", arguments);
+            
+            Console.WriteLine($"sc.exe output: {result.Output}");
+            Console.WriteLine($"sc.exe exit code: {result.ExitCode}");
+            
             if (result.ExitCode != 0)
             {
+                Console.WriteLine($"Service creation failed!");
                 throw new InvalidOperationException($"Failed to create service: {result.Output}");
             }
 
+            Console.WriteLine($"Service created successfully");
             _logger.LogInformation("Service '{ServiceName}' installed successfully", config.Name);
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"Installation failed: {ex.Message}");
             _logger.LogError(ex, "Failed to install service: {ServiceName}", config.Name);
             throw;
         }
@@ -197,12 +211,30 @@ public class WindowsServiceManager
         return status.HasValue;
     }
 
-    private string BuildCreateServiceArguments(ServiceConfig config, string executablePath)
+    private string BuildCreateServiceArguments(ServiceConfig config, string executablePath, string? sourceConfigPath = null)
     {
+        // We need to pass the config file path to the service so it knows what to run
+        // Store the config file path in a predictable location for the service to find
+        var configDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WinLet");
+        Directory.CreateDirectory(configDir);
+        
+        var serviceConfigPath = Path.Combine(configDir, $"{config.Name}.toml");
+        
+        // Copy the original config file to the service config location if provided
+        if (!string.IsNullOrEmpty(sourceConfigPath) && File.Exists(sourceConfigPath))
+        {
+            _logger.LogInformation("Copying config from {SourcePath} to {DestPath}", sourceConfigPath, serviceConfigPath);
+            File.Copy(sourceConfigPath, serviceConfigPath, overwrite: true);
+        }
+        else
+        {
+            _logger.LogWarning("No source config path provided or file doesn't exist. Service may not start properly.");
+        }
+        
         var arguments = new List<string>
         {
             config.Name,
-            $"binPath= \"{executablePath} --service\"",
+            $"binPath= \"{executablePath} --config-path \\\"{serviceConfigPath}\\\"\"",
             $"DisplayName= \"{config.DisplayName}\"",
             "start= auto",
             "type= own"

@@ -369,9 +369,27 @@ public class LogManager : IDisposable
     {
         try
         {
-            var pattern = $"{_serviceName}.*.*.log";
-            var logFiles = Directory.GetFiles(_logDirectory, pattern)
-                .Select(f => new FileInfo(f))
+            // Use multiple patterns to catch all log file variations  
+            var patterns = new[]
+            {
+                $"{_serviceName}.*.log",           // Basic: service.out.log, service.err.log
+                $"{_serviceName}.*.*.log",         // Rolled: service.out.1.log, service.20241201.out.log
+                $"{_serviceName}.*.*.*.log"        // Complex: service.20241201.out.1.log (if both time + size rolling)
+            };
+            
+            var allLogFiles = new List<FileInfo>();
+            foreach (var pattern in patterns)
+            {
+                var files = Directory.GetFiles(_logDirectory, pattern)
+                    .Select(f => new FileInfo(f))
+                    .ToArray();
+                allLogFiles.AddRange(files);
+            }
+            
+            // Remove duplicates and sort by last write time
+            var logFiles = allLogFiles
+                .GroupBy(f => f.FullName)
+                .Select(g => g.First())
                 .OrderByDescending(f => f.LastWriteTime)
                 .Skip(_config.KeepFiles)
                 .ToList();
@@ -406,17 +424,53 @@ public class LogManager : IDisposable
         try
         {
             var cutoffDate = DateTime.Now.AddDays(-_config.ZipOlderThanDays.Value);
-            var pattern = $"{_serviceName}.*.log";
-            var oldFiles = Directory.GetFiles(_logDirectory, pattern)
-                .Select(f => new FileInfo(f))
-                .Where(f => f.LastWriteTime < cutoffDate)
+            
+            // Use multiple patterns to catch all log file variations
+            var patterns = new[]
+            {
+                $"{_serviceName}.*.log",           // Basic: service.out.log, service.err.log
+                $"{_serviceName}.*.*.log",         // Rolled: service.out.1.log, service.20241201.out.log
+                $"{_serviceName}.*.*.*.log"        // Complex: service.20241201.out.1.log (if both time + size rolling)
+            };
+            
+            var oldFiles = new List<FileInfo>();
+            foreach (var pattern in patterns)
+            {
+                var files = Directory.GetFiles(_logDirectory, pattern)
+                    .Select(f => new FileInfo(f))
+                    .Where(f => f.LastWriteTime < cutoffDate)
+                    .ToArray();
+                oldFiles.AddRange(files);
+            }
+            
+            // Remove duplicates (in case a file matches multiple patterns)
+            oldFiles = oldFiles.GroupBy(f => f.FullName).Select(g => g.First()).ToList();
+            
+            // Exclude currently active log files to prevent conflicts
+            var currentStdoutFile = GetLogFileName("out");
+            var currentStderrFile = _config.SeparateErrorLog ? GetLogFileName("err") : currentStdoutFile;
+            
+            oldFiles = oldFiles.Where(f => 
+                !string.Equals(f.FullName, currentStdoutFile, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(f.FullName, currentStderrFile, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
             if (!oldFiles.Any())
+            {
+                _logger.LogDebug("No old log files found for archiving");
                 return;
+            }
 
             var zipFileName = $"{_serviceName}.{DateTime.Now.ToString(_config.ZipDateFormat ?? "yyyyMM")}.zip";
             var zipPath = Path.Combine(_logDirectory, zipFileName);
+            
+            // If zip file already exists, append timestamp to make it unique
+            if (File.Exists(zipPath))
+            {
+                var timestamp = DateTime.Now.ToString("HHmmss");
+                zipFileName = $"{_serviceName}.{DateTime.Now.ToString(_config.ZipDateFormat ?? "yyyyMM")}.{timestamp}.zip";
+                zipPath = Path.Combine(_logDirectory, zipFileName);
+            }
 
             using var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create);
             foreach (var file in oldFiles)

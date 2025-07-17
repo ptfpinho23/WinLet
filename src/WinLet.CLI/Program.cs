@@ -12,6 +12,24 @@ class Program
     [SupportedOSPlatform("windows")]
     static async Task<int> Main(string[] args)
     {
+        // Convert relative config paths to absolute paths before UAC elevation
+        args = ConvertConfigPathsToAbsolute(args);
+        
+        // Check for UAC elevation requirement for admin operations
+        // But skip elevation for help commands
+        if (args.Length > 0 && 
+            UacHelper.RequiresAdminPrivileges(args[0]) && 
+            !args.Contains("--help") && 
+            !args.Contains("-h") && 
+            !args.Contains("-?"))
+        {
+            if (UacHelper.ElevateIfRequired(args))
+            {
+                // Process was restarted with elevation, this code won't be reached
+                return 0;
+            }
+        }
+
         // Create root command
         var rootCommand = new RootCommand("WinLet - Modern Windows Service Manager")
         {
@@ -46,27 +64,84 @@ class Program
         {
             try
             {
+                Console.WriteLine("Starting service installation...");
+                
+                // Double-check admin privileges before proceeding
+                if (!UacHelper.IsRunningAsAdministrator())
+                {
+                    Console.WriteLine("Error: Administrator privileges are required to install services.");
+                    Console.WriteLine("   Please run this command from an elevated command prompt or allow UAC elevation.");
+                    Environment.Exit(1);
+                }
+
+                Console.WriteLine($"Running with administrator privileges");
+                Console.WriteLine($"Working directory: {Environment.CurrentDirectory}");
+                Console.WriteLine($"Loading configuration from: {configPath}");
+                
+                if (!File.Exists(configPath))
+                {
+                    Console.WriteLine($"Error: Configuration file not found: {configPath}");
+                    Environment.Exit(1);
+                }
+
                 var config = ConfigLoader.LoadFromFile(configPath);
+                Console.WriteLine($"Configuration loaded successfully");
+                Console.WriteLine($"   Service Name: {config.Name}");
+                Console.WriteLine($"   Display Name: {config.DisplayName}");
+                Console.WriteLine($"   Executable: {config.Process.Executable}");
+                
                 var serviceManager = CreateServiceManager();
                 
-                // Get the WinLet.Service executable path (should be alongside the CLI)
-                var serviceExePath = Path.Combine(AppContext.BaseDirectory, "WinLetService.exe");
+                // Get the WinLet.Service executable path (should be in service subfolder)
+                var basePath = Path.GetDirectoryName(Environment.ProcessPath) ?? "";
+                var serviceExePath = Path.Combine(basePath, "service", "WinLetService.exe");
+                Console.WriteLine($"Looking for WinLetService.exe at: {serviceExePath}");
+                
                 if (!File.Exists(serviceExePath))
                 {
-                    // Try looking in the same directory as the CLI
-                    serviceExePath = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath) ?? "", "WinLetService.exe");
+                    Console.WriteLine("Error: WinLetService.exe not found. Please ensure the service is built and published.");
+                    Console.WriteLine($"   Expected location: {serviceExePath}");
+                    Console.WriteLine($"   Current directory: {Environment.CurrentDirectory}");
+                    Console.WriteLine($"   Process path: {Environment.ProcessPath}");
+                    Environment.Exit(1);
                 }
                 
+                Console.WriteLine($"Found WinLetService.exe at: {serviceExePath}");
                 Console.WriteLine($"Installing service: {config.Name}");
-                await serviceManager.InstallServiceAsync(config, serviceExePath);
-                Console.WriteLine($"✅ Service '{config.Name}' installed successfully!");
+                
+                await serviceManager.InstallServiceAsync(config, serviceExePath, configPath);
+                
+                Console.WriteLine($"Service '{config.Name}' installed successfully!");
                 Console.WriteLine($"   Display Name: {config.DisplayName}");
                 if (!string.IsNullOrEmpty(config.Description))
                     Console.WriteLine($"   Description: {config.Description}");
+                Console.WriteLine($"Use 'winlet start --name {config.Name}' to start the service");
+            }
+            catch (ConfigurationException ex)
+            {
+                Console.WriteLine($"Configuration Error: {ex.Message}");
+                Environment.Exit(1);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.WriteLine("Error: Access denied. Administrator privileges are required to install services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5) // ERROR_ACCESS_DENIED
+            {
+                Console.WriteLine("Error: Access denied. Administrator privileges are required to install services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Error: {ex.Message}");
+                Console.WriteLine($"Error: {ex.Message}");
+                Console.WriteLine($"   Exception Type: {ex.GetType().Name}");
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"   Inner Exception: {ex.InnerException.Message}");
+                }
                 Environment.Exit(1);
             }
         }, configOption);
@@ -91,15 +166,35 @@ class Program
         {
             try
             {
+                // Double-check admin privileges before proceeding
+                if (!UacHelper.IsRunningAsAdministrator())
+                {
+                    Console.WriteLine("Error: Administrator privileges are required to uninstall services.");
+                    Console.WriteLine("   Please run this command from an elevated command prompt or allow UAC elevation.");
+                    Environment.Exit(1);
+                }
+
                 var serviceManager = CreateServiceManager();
                 
                 Console.WriteLine($"Uninstalling service: {serviceName}");
                 await serviceManager.UninstallServiceAsync(serviceName);
-                Console.WriteLine($"✅ Service '{serviceName}' uninstalled successfully!");
+                Console.WriteLine($"Service '{serviceName}' uninstalled successfully!");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.WriteLine("Error: Access denied. Administrator privileges are required to uninstall services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5) // ERROR_ACCESS_DENIED
+            {
+                Console.WriteLine("Error: Access denied. Administrator privileges are required to uninstall services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Error: {ex.Message}");
+                Console.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
         }, nameOption);
@@ -124,15 +219,35 @@ class Program
         {
             try
             {
+                // Double-check admin privileges before proceeding
+                if (!UacHelper.IsRunningAsAdministrator())
+                {
+                    Console.WriteLine("Error: Administrator privileges are required to start services.");
+                    Console.WriteLine("   Please run this command from an elevated command prompt or allow UAC elevation.");
+                    Environment.Exit(1);
+                }
+
                 var serviceManager = CreateServiceManager();
                 
                 Console.WriteLine($"Starting service: {serviceName}");
                 await serviceManager.StartServiceAsync(serviceName);
-                Console.WriteLine($"✅ Service '{serviceName}' started successfully!");
+                Console.WriteLine($"Service '{serviceName}' started successfully!");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.WriteLine("Error: Access denied. Administrator privileges are required to start services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5) // ERROR_ACCESS_DENIED
+            {
+                Console.WriteLine("Error: Access denied. Administrator privileges are required to start services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Error: {ex.Message}");
+                Console.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
         }, nameOption);
@@ -157,15 +272,35 @@ class Program
         {
             try
             {
+                // Double-check admin privileges before proceeding
+                if (!UacHelper.IsRunningAsAdministrator())
+                {
+                    Console.WriteLine("Error: Administrator privileges are required to stop services.");
+                    Console.WriteLine("   Please run this command from an elevated command prompt or allow UAC elevation.");
+                    Environment.Exit(1);
+                }
+
                 var serviceManager = CreateServiceManager();
                 
                 Console.WriteLine($"Stopping service: {serviceName}");
                 await serviceManager.StopServiceAsync(serviceName);
-                Console.WriteLine($"✅ Service '{serviceName}' stopped successfully!");
+                Console.WriteLine($"Service '{serviceName}' stopped successfully!");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.WriteLine("Error: Access denied. Administrator privileges are required to stop services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5) // ERROR_ACCESS_DENIED
+            {
+                Console.WriteLine("Error: Access denied. Administrator privileges are required to stop services.");
+                Console.WriteLine("   Please run this command from an elevated command prompt.");
+                Environment.Exit(1);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Error: {ex.Message}");
+                Console.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
         }, nameOption);
@@ -221,7 +356,7 @@ class Program
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Error: {ex.Message}");
+                Console.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
         }, nameOption);
@@ -249,7 +384,7 @@ class Program
         command.SetHandler(async (string serviceName, int tailLines) =>
         {
             // For now, this is a placeholder - we'd need to implement log reading
-            Console.WriteLine($"📋 Logs for service: {serviceName} (last {tailLines} lines)");
+            Console.WriteLine($"Logs for service: {serviceName} (last {tailLines} lines)");
             Console.WriteLine("Log viewing functionality will be implemented based on logging configuration");
             await Task.CompletedTask;
         }, nameOption, tailOption);
@@ -265,5 +400,32 @@ class Program
         var logger = serviceProvider.GetRequiredService<ILogger<WindowsServiceManager>>();
         
         return new WindowsServiceManager(logger);
+    }
+
+    /// <summary>
+    /// Convert relative config file paths to absolute paths in command line arguments
+    /// </summary>
+    /// <param name="args">Original command line arguments</param>
+    /// <returns>Arguments with absolute config paths</returns>
+    private static string[] ConvertConfigPathsToAbsolute(string[] args)
+    {
+        var result = new List<string>();
+        
+        for (int i = 0; i < args.Length; i++)
+        {
+            result.Add(args[i]);
+            
+            // Check if this is a --config argument and we have a next argument
+            if ((args[i] == "--config" || args[i] == "-c") && i + 1 < args.Length)
+            {
+                // Convert the config path to absolute
+                var configPath = args[i + 1];
+                var absolutePath = Path.GetFullPath(configPath);
+                result.Add(absolutePath);
+                i++; // Skip the next argument since we've processed it
+            }
+        }
+        
+        return result.ToArray();
     }
 } 

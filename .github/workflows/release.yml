@@ -1,0 +1,129 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    strategy:
+      matrix:
+        include:
+          # Windows builds
+          - os: windows-latest
+            runtime: win-x64
+            archive_name: WinLet-win-x64
+          - os: windows-latest
+            runtime: win-arm64
+            archive_name: WinLet-win-arm64
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+        
+    - name: Restore dependencies
+      run: dotnet restore WinLet.sln
+      
+    - name: Build and publish
+      run: |
+        # Create output directory
+        New-Item -ItemType Directory -Force -Path "bin"
+        
+        # Build CLI
+        dotnet publish src/WinLet.CLI/WinLet.CLI.csproj `
+          --configuration Release `
+          --runtime ${{ matrix.runtime }} `
+          --self-contained true `
+          --output "bin/" `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:PublishTrimmed=false
+          
+        # Build Service
+        dotnet publish src/WinLet.Service/WinLet.Service.csproj `
+          --configuration Release `
+          --runtime ${{ matrix.runtime }} `
+          --self-contained true `
+          --output "bin/service/" `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:PublishTrimmed=false
+          
+        # Copy examples
+        Copy-Item -Recurse examples bin/
+        
+        # Copy documentation
+        Copy-Item readme.md bin/
+        Copy-Item CONFIGURATION.md bin/
+      shell: pwsh
+      
+    - name: Create release archive
+      run: |
+        Compress-Archive -Path "bin/*" -DestinationPath "${{ matrix.archive_name }}.zip"
+      shell: pwsh
+          
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.archive_name }}
+        path: ${{ matrix.archive_name }}.zip
+        retention-days: 1
+          
+  create-release:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        
+    - name: Get tag name  
+      id: tag
+      run: |
+        echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag.outputs.tag_name }}
+        name: WinLet ${{ steps.tag.outputs.tag_name }}
+        draft: false
+        prerelease: ${{ contains(steps.tag.outputs.tag_name, '-') }}
+        files: artifacts/**/*.zip
+        body: |
+          ## WinLet ${{ steps.tag.outputs.tag_name }}
+          
+          ### Windows Downloads 🪟
+          - **WinLet-win-x64.zip** - Windows 64-bit (Intel/AMD)
+          - **WinLet-win-arm64.zip** - Windows ARM64 (Surface Pro X, etc.)
+          
+          ### Installation
+          1. Download the appropriate ZIP file for your architecture
+          2. Extract to your preferred location  
+          3. Run `WinLet.exe` with administrator privileges
+          4. Start managing your applications as Windows Services!
+          
+          ### What's Included
+          - `WinLet.exe` - Main CLI tool
+          - `service/` - Service runtime files  
+          - `examples/` - Configuration examples
+          - `readme.md` - Quick start guide
+          - `CONFIGURATION.md` - Complete configuration reference
+          
+          ### System Requirements
+          - Windows 10/Server 2016+ (64-bit)
+          - Administrator privileges (for service operations)
+          - No .NET installation required (self-contained)
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 

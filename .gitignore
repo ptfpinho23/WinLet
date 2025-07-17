@@ -134,3 +134,6 @@ _NCrunch*
 
 bin/
 Bin/
+
+
+test-output/
