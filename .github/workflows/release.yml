@@ -10,7 +10,6 @@ jobs:
     strategy:
       matrix:
         include:
-          # Windows builds
           - os: windows-latest
             runtime: win-x64
             archive_name: WinLet-win-x64
@@ -69,7 +68,7 @@ jobs:
       run: |
         Compress-Archive -Path "bin/*" -DestinationPath "${{ matrix.archive_name }}.zip"
       shell: pwsh
-          
+            
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -89,24 +88,15 @@ jobs:
         
     - name: Get tag name  
       id: tag
-      run: |
-        if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-          # Triggered by tag push - extract tag name
-          TAG_NAME=$(echo "$GITHUB_REF" | sed 's|refs/tags/||')
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-        else
-          # Triggered manually - use current date/time
-          MANUAL_TAG="manual-$(date +'%Y%m%d-%H%M%S')"
-          echo "tag_name=$MANUAL_TAG" >> $GITHUB_OUTPUT
-        fi
+      run: echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
         
-          - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.tag.outputs.tag_name }}
-          name: WinLet ${{ steps.tag.outputs.tag_name }}
-          draft: false
-          prerelease: ${{ contains(steps.tag.outputs.tag_name, '-') || startsWith(steps.tag.outputs.tag_name, 'manual-') }}
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag.outputs.tag_name }}
+        name: WinLet ${{ steps.tag.outputs.tag_name }}
+        draft: false
+        prerelease: ${{ contains(steps.tag.outputs.tag_name, '-') }}
         files: artifacts/**/*.zip
         body: |
           ## WinLet ${{ steps.tag.outputs.tag_name }}
