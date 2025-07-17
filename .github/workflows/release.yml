@@ -75,10 +75,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.archive_name }}
-        path: |
-          ${{ matrix.archive_name }}.*
-          *.deb
-          *.rpm
+        path: ${{ matrix.archive_name }}.zip
         retention-days: 1
           
   create-release:
@@ -103,62 +100,30 @@ jobs:
         name: WinLet ${{ steps.tag.outputs.tag_name }}
         draft: false
         prerelease: ${{ contains(steps.tag.outputs.tag_name, '-') }}
-        files: artifacts/**/WinLet-*
+        files: artifacts/**/*.zip
         body: |
           ## WinLet ${{ steps.tag.outputs.tag_name }}
           
-          ### Windows (Recommended) 🪟
+          ### Windows Downloads 🪟
           - **WinLet-win-x64.zip** - Windows 64-bit (Intel/AMD)
           - **WinLet-win-arm64.zip** - Windows ARM64 (Surface Pro X, etc.)
           
-          ### Linux (Limited Functionality) 🐧
-          - **WinLet-linux-x64.tar.gz** - Linux 64-bit (Intel/AMD)
-          - **WinLet-linux-arm64.tar.gz** - Linux ARM64 (Raspberry Pi, etc.)
-          - **winlet-${{ steps.tag.outputs.tag_name }}-linux-amd64.deb** - Debian/Ubuntu package
-          - **winlet-*.rpm** - Red Hat/Fedora/CentOS package
-          
-          ### macOS (Limited Functionality) 🍎
-          - **WinLet-macos-x64.tar.gz** - macOS Intel 64-bit
-          - **WinLet-macos-arm64.tar.gz** - macOS Apple Silicon (M1/M2/M3)
-          
           ### Installation
-          
-          #### Windows (Full Features)
-          1. Download the appropriate Windows ZIP file
+          1. Download the appropriate ZIP file for your architecture
           2. Extract to your preferred location  
           3. Run `WinLet.exe` with administrator privileges
-          4. Full Windows Service management capabilities
-          
-          #### Linux/macOS (Limited Features)
-          ```bash
-          # Debian/Ubuntu
-          sudo dpkg -i winlet-*.deb
-          
-          # Red Hat/Fedora
-          sudo rpm -i winlet-*.rpm
-          
-          # Manual installation (any distro)
-          tar -xzf WinLet-linux-x64.tar.gz
-          sudo cp WinLet /usr/local/bin/winlet
-          ```
-          
-          **⚠️ Linux/macOS Limitations:**
-          - No Windows Service management
-          - Process wrapping only
-          - Limited logging features
-          - No UAC elevation
+          4. Start managing your applications as Windows Services!
           
           ### What's Included
-          - `WinLet(.exe)` - Main CLI tool
+          - `WinLet.exe` - Main CLI tool
           - `service/` - Service runtime files  
           - `examples/` - Configuration examples
           - `readme.md` - Quick start guide
           - `CONFIGURATION.md` - Complete configuration reference
           
           ### System Requirements
-          - **Windows:** 10/Server 2016+ (64-bit), Administrator privileges
-          - **Linux:** glibc 2.17+ (CentOS 7+, Ubuntu 18.04+, Debian 9+)
-          - **macOS:** 10.15+ (Catalina or newer)
+          - Windows 10/Server 2016+ (64-bit)
+          - Administrator privileges (for service operations)
           - No .NET installation required (self-contained)
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
