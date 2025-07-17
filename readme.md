@@ -108,8 +108,8 @@ cd WinLet
 .\clean.ps1
 ```
 
-### Runtime Requirements (End Users)
-- Windows 10/Server 2016+ (64-bit)
+## Runtime Requirements
+- Windows 10/Server 2016+
 - Administrator privileges (for service operations)
 
 ## Roadmap
