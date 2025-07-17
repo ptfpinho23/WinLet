@@ -33,8 +33,7 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore WinLet.sln
       
-    - name: Build and publish (Windows)
-      if: startsWith(matrix.runtime, 'win-')
+    - name: Build and publish
       run: |
         # Create output directory
         New-Item -ItemType Directory -Force -Path "bin"
@@ -67,150 +66,10 @@ jobs:
         Copy-Item CONFIGURATION.md bin/
       shell: pwsh
       
-    - name: Build and publish (Linux/macOS)
-      if: startsWith(matrix.runtime, 'linux-') || startsWith(matrix.runtime, 'osx-')
-      run: |
-        # Create output directory
-        mkdir -p bin
-        
-        # Build CLI
-        dotnet publish src/WinLet.CLI/WinLet.CLI.csproj \
-          --configuration Release \
-          --runtime ${{ matrix.runtime }} \
-          --self-contained true \
-          --output "bin/" \
-          -p:PublishSingleFile=true \
-          -p:IncludeNativeLibrariesForSelfExtract=true \
-          -p:PublishTrimmed=false
-          
-        # Build Service (note: limited functionality on non-Windows)
-        dotnet publish src/WinLet.Service/WinLet.Service.csproj \
-          --configuration Release \
-          --runtime ${{ matrix.runtime }} \
-          --self-contained true \
-          --output "bin/service/" \
-          -p:PublishSingleFile=true \
-          -p:IncludeNativeLibrariesForSelfExtract=true \
-          -p:PublishTrimmed=false
-          
-        # Copy examples and docs
-        cp -r examples bin/
-        cp readme.md bin/
-        cp CONFIGURATION.md bin/
-        
-        # Add platform warning
-        echo "⚠️ WARNING: This is a Linux/macOS build of WinLet." > bin/PLATFORM_WARNING.txt
-        echo "WinLet is designed for Windows Services and has limited functionality on this platform." >> bin/PLATFORM_WARNING.txt
-        echo "Most service management features will not work outside of Windows." >> bin/PLATFORM_WARNING.txt
-      shell: bash
-      
-    - name: Create ZIP archive (Windows)
-      if: matrix.archive_format == 'zip'
+    - name: Create release archive
       run: |
         Compress-Archive -Path "bin/*" -DestinationPath "${{ matrix.archive_name }}.zip"
       shell: pwsh
-      
-    - name: Create TAR.GZ archive (Linux/macOS)
-      if: matrix.archive_format == 'tar.gz'
-      run: |
-        tar -czf "${{ matrix.archive_name }}.tar.gz" -C bin .
-      shell: bash
-        
-    - name: Create DEB package (Linux x64 only)
-      if: matrix.runtime == 'linux-x64'
-      run: |
-        # Create DEB package structure
-        mkdir -p deb-package/DEBIAN
-        mkdir -p deb-package/usr/local/bin/winlet
-        mkdir -p deb-package/usr/local/share/winlet
-        mkdir -p deb-package/usr/share/doc/winlet
-        
-        # Copy binaries
-        cp -r bin/* deb-package/usr/local/share/winlet/
-        
-        # Create symlink for CLI
-        ln -sf /usr/local/share/winlet/WinLet deb-package/usr/local/bin/winlet
-        
-        # Create control file
-        cat > deb-package/DEBIAN/control << 'EOF'
-        Package: winlet
-        Version: ${{ github.ref_name }}
-        Section: utils
-        Priority: optional
-        Architecture: amd64
-        Maintainer: WinLet Project
-        Description: Windows Service wrapper for any application
-         WinLet allows you to wrap any application as a Windows Service
-         using simple TOML configuration. Note: Limited functionality on Linux.
-        Homepage: https://github.com/ptfpinho23/WinLet
-        EOF
-        
-        # Create postinst script
-        cat > deb-package/DEBIAN/postinst << 'EOF'
-        #!/bin/bash
-        chmod +x /usr/local/share/winlet/WinLet
-        chmod +x /usr/local/share/winlet/service/WinLetService
-        echo "⚠️  WARNING: WinLet has limited functionality on Linux."
-        echo "   Most Windows Service features will not work."
-        EOF
-        chmod 755 deb-package/DEBIAN/postinst
-        
-        # Build DEB package
-        dpkg-deb --build deb-package winlet-${{ github.ref_name }}-linux-amd64.deb
-      shell: bash
-        
-    - name: Create RPM package (Linux x64 only)
-      if: matrix.runtime == 'linux-x64'
-      run: |
-        # Install rpm tools
-        sudo apt-get update && sudo apt-get install -y rpm
-        
-        # Create RPM spec file
-        mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-        
-        cat > ~/rpmbuild/SPECS/winlet.spec << 'EOF'
-        Name:           winlet
-        Version:        ${GITHUB_REF_NAME#v}
-        Release:        1%{?dist}
-        Summary:        Windows Service wrapper for any application
-        License:        MIT
-        URL:            https://github.com/ptfpinho23/WinLet
-        BuildArch:      x86_64
-        
-        %description
-        WinLet allows you to wrap any application as a Windows Service
-        using simple TOML configuration. Note: Limited functionality on Linux.
-        
-        %install
-        mkdir -p %{buildroot}/usr/local/share/winlet
-        mkdir -p %{buildroot}/usr/local/bin
-        cp -r %{_builddir}/../bin/* %{buildroot}/usr/local/share/winlet/
-        ln -sf /usr/local/share/winlet/WinLet %{buildroot}/usr/local/bin/winlet
-        
-        %files
-        /usr/local/share/winlet/*
-        /usr/local/bin/winlet
-        
-        %post
-        chmod +x /usr/local/share/winlet/WinLet
-        chmod +x /usr/local/share/winlet/service/WinLetService
-        echo "⚠️  WARNING: WinLet has limited functionality on Linux."
-        echo "   Most Windows Service features will not work."
-        
-        %changelog
-        * $(date +'%a %b %d %Y') WinLet Project - ${GITHUB_REF_NAME#v}-1
-        - Release ${GITHUB_REF_NAME}
-        EOF
-        
-        # Copy source files
-        cp -r bin ~/rpmbuild/BUILD/
-        
-        # Build RPM
-        rpmbuild -bb ~/rpmbuild/SPECS/winlet.spec
-        cp ~/rpmbuild/RPMS/x86_64/*.rpm .
-      shell: bash
-      env:
-        GITHUB_REF_NAME: ${{ github.ref_name }}
           
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
