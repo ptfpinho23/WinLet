@@ -1,3 +1,5 @@
+[![.github/workflows/release.yml](https://github.com/ptfpinho23/WinLet/actions/workflows/release.yml/badge.svg?branch=feat%2Fadd-uac-elevation)](https://github.com/ptfpinho23/WinLet/actions/workflows/release.yml)
+
 <div align="center">
 
 # WinLet
