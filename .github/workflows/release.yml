@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - 'v*.*.*'
-  workflow_dispatch:
 
 jobs:
   build-and-release:
@@ -91,15 +90,21 @@ jobs:
     - name: Get tag name  
       id: tag
       run: |
-        echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          # Triggered by tag push
+          echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        else
+          # Triggered manually - use current date/time
+          echo "tag_name=manual-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+        fi
         
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ steps.tag.outputs.tag_name }}
-        name: WinLet ${{ steps.tag.outputs.tag_name }}
-        draft: false
-        prerelease: ${{ contains(steps.tag.outputs.tag_name, '-') }}
+          - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.tag.outputs.tag_name }}
+          name: WinLet ${{ steps.tag.outputs.tag_name }}
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.tag_name, '-') || startsWith(steps.tag.outputs.tag_name, 'manual-') }}
         files: artifacts/**/*.zip
         body: |
           ## WinLet ${{ steps.tag.outputs.tag_name }}
