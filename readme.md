@@ -140,6 +140,13 @@ cd WinLet
 - [ ] VS Code extension for config editing
 - [ ] Automatic log rotation and cleanup
 
+
+### Misc
+- [ ] Add support for gMSA ACs
+- [ ] Crash dump gen
+- [ ] Registry Configs 
+
+
 ## License
 
 MIT License
