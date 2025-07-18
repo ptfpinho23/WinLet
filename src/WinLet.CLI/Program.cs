@@ -12,6 +12,9 @@ class Program
     [SupportedOSPlatform("windows")]
     static async Task<int> Main(string[] args)
     {
+        // Initialize crash dump handling for Windows
+        CrashDumpHelper.InitializeCrashDumpHandler();
+        
         // Convert relative config paths to absolute paths before UAC elevation
         args = ConvertConfigPathsToAbsolute(args);
         
@@ -136,12 +139,30 @@ class Program
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
-                Console.WriteLine($"   Exception Type: {ex.GetType().Name}");
-                if (ex.InnerException != null)
+                Console.WriteLine($"Error: {ex.GetType().Name}: {ex.Message}");
+                
+                // Log full exception details
+                var currentEx = ex;
+                var depth = 0;
+                while (currentEx != null)
                 {
-                    Console.WriteLine($"   Inner Exception: {ex.InnerException.Message}");
+                    if (depth > 0)
+                    {
+                        Console.WriteLine($"   Inner Exception {depth}: {currentEx.GetType().Name}: {currentEx.Message}");
+                    }
+                    currentEx = currentEx.InnerException;
+                    depth++;
                 }
+                
+                // Only show stack trace for unexpected exceptions (not configuration errors)
+                if (!(ex is ConfigurationException || ex is UnauthorizedAccessException || ex is System.ComponentModel.Win32Exception))
+                {
+                    Console.WriteLine($"   Stack Trace: {ex.StackTrace}");
+                    
+                    // Create crash dump for unexpected critical failures
+                    CrashDumpHelper.CreateCrashDump(ex, "ServiceInstallationFailure");
+                }
+                
                 Environment.Exit(1);
             }
         }, configOption);
@@ -194,7 +215,15 @@ class Program
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.WriteLine($"Error: {ex.GetType().Name}: {ex.Message}");
+                
+                // For unexpected exceptions, show full details and create crash dump
+                if (!(ex is UnauthorizedAccessException || ex is System.ComponentModel.Win32Exception))
+                {
+                    Console.WriteLine($"   Stack Trace: {ex.StackTrace}");
+                    CrashDumpHelper.CreateCrashDump(ex, "ServiceOperationFailure");
+                }
+                
                 Environment.Exit(1);
             }
         }, nameOption);
@@ -247,7 +276,15 @@ class Program
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.WriteLine($"Error: {ex.GetType().Name}: {ex.Message}");
+                
+                // For unexpected exceptions, show full details and create crash dump
+                if (!(ex is UnauthorizedAccessException || ex is System.ComponentModel.Win32Exception))
+                {
+                    Console.WriteLine($"   Stack Trace: {ex.StackTrace}");
+                    CrashDumpHelper.CreateCrashDump(ex, "ServiceOperationFailure");
+                }
+                
                 Environment.Exit(1);
             }
         }, nameOption);
@@ -300,7 +337,15 @@ class Program
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.WriteLine($"Error: {ex.GetType().Name}: {ex.Message}");
+                
+                // For unexpected exceptions, show full details and create crash dump
+                if (!(ex is UnauthorizedAccessException || ex is System.ComponentModel.Win32Exception))
+                {
+                    Console.WriteLine($"   Stack Trace: {ex.StackTrace}");
+                    CrashDumpHelper.CreateCrashDump(ex, "ServiceOperationFailure");
+                }
+                
                 Environment.Exit(1);
             }
         }, nameOption);
@@ -356,7 +401,15 @@ class Program
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.WriteLine($"Error: {ex.GetType().Name}: {ex.Message}");
+                
+                // For unexpected exceptions, show full details and create crash dump
+                if (!(ex is UnauthorizedAccessException || ex is System.ComponentModel.Win32Exception))
+                {
+                    Console.WriteLine($"   Stack Trace: {ex.StackTrace}");
+                    CrashDumpHelper.CreateCrashDump(ex, "ServiceOperationFailure");
+                }
+                
                 Environment.Exit(1);
             }
         }, nameOption);

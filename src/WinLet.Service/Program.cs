@@ -11,6 +11,9 @@ public class Program
 {
     public static async Task Main(string[] args)
     {
+        // Initialize crash dump handling for Windows
+        CrashDumpHelper.InitializeCrashDumpHandler();
+        
         var builder = Host.CreateApplicationBuilder(args);
         
         // Parse command line arguments
@@ -56,8 +59,13 @@ public class Program
         }
         catch (Exception ex)
         {
-            // Can't write to log file, continue anyway
-            Console.WriteLine($"Could not write to log file: {ex.Message}");
+            // Log full exception details for better debugging
+            Console.WriteLine($"Could not write to log file: {ex.GetType().Name}: {ex.Message}");
+            if (ex.InnerException != null)
+            {
+                Console.WriteLine($"Inner exception: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+            }
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
         }
         
         try

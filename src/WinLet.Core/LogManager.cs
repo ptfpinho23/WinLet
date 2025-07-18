@@ -86,7 +86,11 @@ public class LogManager : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to initialize logging");
+            _logger.LogError(ex, "Failed to initialize logging. Exception: {ExceptionType}, Message: {Message}, StackTrace: {StackTrace}", 
+                ex.GetType().Name, ex.Message, ex.StackTrace);
+            
+            // Generate crash dump for critical logging failures
+            CrashDumpHelper.CreateCrashDump(ex, "LoggingInitializationFailure");
             throw;
         }
     }
@@ -233,7 +237,14 @@ public class LogManager : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to write stdout data");
+            _logger.LogError(ex, "Failed to write stdout data. Exception: {ExceptionType}, Message: {Message}, StackTrace: {StackTrace}", 
+                ex.GetType().Name, ex.Message, ex.StackTrace);
+            
+            // For critical I/O failures, consider creating a crash dump
+            if (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                CrashDumpHelper.CreateCrashDump(ex, "StdoutWriteFailure");
+            }
         }
     }
 
@@ -262,7 +273,14 @@ public class LogManager : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to write stderr data");
+            _logger.LogError(ex, "Failed to write stderr data. Exception: {ExceptionType}, Message: {Message}, StackTrace: {StackTrace}", 
+                ex.GetType().Name, ex.Message, ex.StackTrace);
+            
+            // For critical I/O failures, consider creating a crash dump
+            if (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                CrashDumpHelper.CreateCrashDump(ex, "StderrWriteFailure");
+            }
         }
     }
 
