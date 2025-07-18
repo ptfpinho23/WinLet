@@ -54,9 +54,25 @@ public class ProcessRunner : IDisposable
             _process.EnableRaisingEvents = true;
             _process.Exited += OnProcessExited;
 
+            _logger.LogDebug("Attempting to start process: {Executable} with args: {Arguments} in directory: {WorkingDirectory}", 
+                processStartInfo.FileName, processStartInfo.Arguments, processStartInfo.WorkingDirectory);
+
             if (!_process.Start())
             {
-                throw new InvalidOperationException("Failed to start process");
+                var error = $"Failed to start process: {_config.Process.Executable}";
+                _logger.LogError(error);
+                
+                // Try to write to log manager, but don't fail if it doesn't work
+                try
+                {
+                    await _logManager.WriteStderrAsync($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [ERROR] {error}\n");
+                }
+                catch (Exception logEx)
+                {
+                    _logger.LogWarning(logEx, "Failed to write process start failure to log file via LogManager");
+                }
+                
+                throw new InvalidOperationException(error);
             }
 
             // Start reading stdout and stderr asynchronously
@@ -71,16 +87,45 @@ public class ProcessRunner : IDisposable
             _logger.LogInformation("Process started with PID: {ProcessId}", _process.Id);
             
             // Log to WinLet service log (using regular ILogger)
-            _logger.LogInformation("🚀 Process started: {Executable} (PID: {ProcessId})", _config.Process.Executable, _process.Id);
+            _logger.LogInformation("Process started: {Executable} (PID: {ProcessId})", _config.Process.Executable, _process.Id);
             
             ProcessStarted?.Invoke(this, new ProcessEventArgs(_process.Id, StartTime.Value));
 
             // Start monitoring task
             _monitoringTask = MonitorProcessAsync(_cancellationTokenSource.Token);
         }
+        catch (System.ComponentModel.Win32Exception win32Ex)
+        {
+            var error = $"Win32 error starting process '{_config.Process.Executable}': {win32Ex.Message} (Error Code: {win32Ex.NativeErrorCode})";
+            _logger.LogError(win32Ex, error);
+            
+            // Try to write to log manager, but don't fail if it doesn't work
+            try
+            {
+                await _logManager.WriteStderrAsync($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [ERROR] {error}\n");
+            }
+            catch (Exception logEx)
+            {
+                _logger.LogWarning(logEx, "Failed to write Win32 error to log file via LogManager");
+            }
+            
+            throw new InvalidOperationException(error, win32Ex);
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to start process: {Executable}", _config.Process.Executable);
+            var error = $"Failed to start process: {_config.Process.Executable}. Error: {ex.Message}";
+            _logger.LogError(ex, error);
+            
+            // Try to write to log manager, but don't fail if it doesn't work
+            try
+            {
+                await _logManager.WriteStderrAsync($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [ERROR] {error}\n");
+            }
+            catch (Exception logEx)
+            {
+                _logger.LogWarning(logEx, "Failed to write error to log file via LogManager");
+            }
+            
             throw;
         }
     }
@@ -100,7 +145,7 @@ public class ProcessRunner : IDisposable
         _logger.LogInformation("Stopping process with PID: {ProcessId}", _process.Id);
         
         // Log to WinLet service log (using regular ILogger)
-        _logger.LogInformation("🛑 Stopping process: {Executable} (PID: {ProcessId})", _config.Process.Executable, _process.Id);
+        _logger.LogInformation("Stopping process: {Executable} (PID: {ProcessId})", _config.Process.Executable, _process.Id);
 
         try
         {
@@ -160,13 +205,96 @@ public class ProcessRunner : IDisposable
             startInfo.Environment[envVar.Key] = envVar.Value;
         }
 
+        // Validate working directory exists
+        if (!Directory.Exists(startInfo.WorkingDirectory))
+        {
+            var error = $"Working directory not found: {startInfo.WorkingDirectory}";
+            _logger.LogError(error);
+            throw new InvalidOperationException(error);
+        }
+
+        // Validate executable exists (for non-shell commands)
+        if (!Path.IsPathRooted(_config.Process.Executable))
+        {
+            // Check if executable is in PATH
+            var executablePath = FindExecutableInPath(_config.Process.Executable);
+            if (string.IsNullOrEmpty(executablePath))
+            {
+                var error = $"Executable '{_config.Process.Executable}' not found in PATH or working directory";
+                _logger.LogError(error);
+                throw new InvalidOperationException(error);
+            }
+            startInfo.FileName = executablePath;
+            _logger.LogDebug("Found executable in PATH: {ExecutablePath}", executablePath);
+        }
+        else if (!File.Exists(_config.Process.Executable))
+        {
+            var error = $"Executable file not found: {_config.Process.Executable}";
+            _logger.LogError(error);
+            throw new InvalidOperationException(error);
+        }
+
         return startInfo;
+    }
+
+    /// <summary>
+    /// Find executable in PATH
+    /// </summary>
+    private string? FindExecutableInPath(string executable)
+    {
+        try
+        {
+            // Check if it's already a full path
+            if (Path.IsPathRooted(executable))
+            {
+                return File.Exists(executable) ? executable : null;
+            }
+
+            // Get PATH environment variable
+            var path = Environment.GetEnvironmentVariable("PATH");
+            if (string.IsNullOrEmpty(path))
+            {
+                return null;
+            }
+
+            // Check each PATH directory
+            var pathDirectories = path.Split(Path.PathSeparator);
+            foreach (var directory in pathDirectories)
+            {
+                if (string.IsNullOrEmpty(directory)) continue;
+
+                var fullPath = Path.Combine(directory, executable);
+                if (File.Exists(fullPath))
+                {
+                    return fullPath;
+                }
+
+                // Also check with .exe extension on Windows
+                if (OperatingSystem.IsWindows())
+                {
+                    var exePath = Path.Combine(directory, $"{executable}.exe");
+                    if (File.Exists(exePath))
+                    {
+                        return exePath;
+                    }
+                }
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error searching for executable in PATH: {Executable}", executable);
+            return null;
+        }
     }
 
     private async Task MonitorProcessAsync(CancellationToken cancellationToken)
     {
         try
         {
+            _logger.LogDebug("Starting process monitoring for: {Executable}", _config.Process.Executable);
+            
             while (!cancellationToken.IsCancellationRequested && _process != null)
             {
                 if (_process.HasExited)
@@ -177,7 +305,11 @@ public class ProcessRunner : IDisposable
                     _logger.LogWarning("Process exited with code: {ExitCode}", exitCode);
                     
                     // Log to WinLet service log (using regular ILogger)
-                    _logger.LogWarning("❌ Process exited: {Executable} (PID: {ProcessId}, Exit Code: {ExitCode})", _config.Process.Executable, _process.Id, exitCode);
+                    _logger.LogWarning("Process exited: {Executable} (PID: {ProcessId}, Exit Code: {ExitCode})", _config.Process.Executable, _process.Id, exitCode);
+                    
+                    // Also log to application error log
+                    var errorMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [ERROR] Process exited with code {exitCode}: {_config.Process.Executable}\n";
+                    await _logManager.WriteStderrAsync(errorMessage);
                     
                     ProcessStopped?.Invoke(this, new ProcessEventArgs(_process.Id, exitTime, exitCode));
 
@@ -187,12 +319,15 @@ public class ProcessRunner : IDisposable
                         
                         if (ShouldRestart())
                         {
-                            _logger.LogInformation("🔄 Scheduling restart for: {Executable}", _config.Process.Executable);
+                            _logger.LogInformation("Scheduling restart for: {Executable}", _config.Process.Executable);
                             await HandleRestartAsync(cancellationToken);
                         }
                         else
                         {
-                            _logger.LogError("⛔ Maximum restart attempts reached for: {Executable}", _config.Process.Executable);
+                            _logger.LogError("Maximum restart attempts reached for: {Executable}", _config.Process.Executable);
+                            // Log this to the application error log as well
+                            var maxAttemptsMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [ERROR] Maximum restart attempts ({_config.Restart.MaxAttempts}) reached for {_config.Process.Executable}\n";
+                            await _logManager.WriteStderrAsync(maxAttemptsMessage);
                         }
                     }
                     break;
@@ -201,14 +336,18 @@ public class ProcessRunner : IDisposable
                 // TODO: Implement health checks here if configured
                 await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
             }
+            
+            _logger.LogDebug("Process monitoring ended for: {Executable}", _config.Process.Executable);
         }
         catch (OperationCanceledException)
         {
-            // Expected when cancellation is requested
+            _logger.LogDebug("Process monitoring cancelled for: {Executable}", _config.Process.Executable);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in process monitoring");
+            _logger.LogError(ex, "Error in process monitoring for: {Executable}", _config.Process.Executable);
+            var monitoringErrorMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [ERROR] Process monitoring error: {ex.Message}\n";
+            await _logManager.WriteStderrAsync(monitoringErrorMessage);
         }
     }
 
@@ -240,7 +379,7 @@ public class ProcessRunner : IDisposable
             _restartAttempts, _config.Restart.MaxAttempts);
 
         // Log to WinLet service log (using regular ILogger)
-        _logger.LogInformation("🔄 Restarting process: {Executable} (attempt {Attempt}/{MaxAttempts})", _config.Process.Executable, _restartAttempts, _config.Restart.MaxAttempts);
+        _logger.LogInformation("Restarting process: {Executable} (attempt {Attempt}/{MaxAttempts})", _config.Process.Executable, _restartAttempts, _config.Restart.MaxAttempts);
 
         await Task.Delay(TimeSpan.FromSeconds(_config.Restart.DelaySeconds), cancellationToken);
 
@@ -286,6 +425,12 @@ public class ProcessRunner : IDisposable
             
             // Also log to WinLet service log (always log errors)
             _logger.LogWarning("App stderr: {Error}", e.Data);
+            
+            // If this looks like a startup error, log it more prominently
+            if (e.Data.Contains("not found") || e.Data.Contains("not recognized") || e.Data.Contains("command not found"))
+            {
+                _logger.LogError("Startup error detected: {Error}", e.Data);
+            }
         }
     }
 
