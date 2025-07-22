@@ -1,0 +1,54 @@
+[service]
+name = "production-api"
+display_name = "Production API Service"
+description = "High-availability production API with comprehensive monitoring and crash dump collection"
+
+[process]
+executable = "dotnet"
+arguments = "ProductionAPI.dll"
+working_directory = "C:\\Apps\\ProductionAPI"
+shutdown_timeout_seconds = 60
+
+[process.environment]
+ASPNETCORE_ENVIRONMENT = "Production"
+ASPNETCORE_URLS = "http://+:5000"
+DATABASE_CONNECTION = "Server=prod-db;Database=ProductionAPI;Integrated Security=true"
+
+[logging]
+level = "Information"
+log_path = "D:\\Logs\\ProductionAPI"
+mode = "RollBySizeTime"
+size_threshold_kb = 51200         # 50MB per file
+time_pattern = "yyyyMMdd"         # Daily rollover
+auto_roll_at_time = "02:00:00"    # 2 AM rollover
+keep_files = 14                   # 2 weeks retention
+zip_older_than_days = 3           # Compress after 3 days
+separate_error_log = true
+
+[restart]
+policy = "OnFailure"
+delay_seconds = 15
+max_attempts = 5
+window_seconds = 900              # 15 minute window
+
+[health_check]
+type = "Http"
+endpoint = "http://localhost:5000/health"
+interval_seconds = 30
+timeout_seconds = 10
+failure_threshold = 3
+
+[service_account]
+username = "DOMAIN\\ProductionAPIService"
+allow_service_logon = true
+prompt = "Console"
+
+[crash_dump]
+enabled = true
+dump_path = "D:\\Logs\\ProductionAPI\\CrashDumps"
+type = "Custom"                   # Balanced information vs size
+max_dump_files = 5                # Keep only recent crashes
+max_age_days = 7                  # Weekly cleanup
+include_heap = false              # Security - don't capture sensitive heap data
+compress_dumps = true             # Save disk space
+dump_on_exception = true          # Capture all failure modes 
