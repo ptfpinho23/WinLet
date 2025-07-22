@@ -11,6 +11,7 @@ public class ProcessRunner : IDisposable
     private readonly ServiceConfig _config;
     private readonly ILogger<ProcessRunner> _logger;
     private readonly LogManager _logManager;
+    private readonly CrashDumpManager? _crashDumpManager;
     private Process? _process;
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     private Task? _monitoringTask;
@@ -34,6 +35,13 @@ public class ProcessRunner : IDisposable
         // Create a simple logger for LogManager - we'll use a basic console logger
         var logManagerLogger = new ConsoleLogger<LogManager>();
         _logManager = new LogManager(config.Logging, config.Name, logManagerLogger);
+        
+        // Create crash dump manager if crash dumps are enabled
+        if (config.CrashDump?.Enabled == true)
+        {
+            var crashDumpLogger = new ConsoleLogger<CrashDumpManager>();
+            _crashDumpManager = new CrashDumpManager(config.CrashDump, config.Name, crashDumpLogger);
+        }
     }
 
     /// <summary>
@@ -317,6 +325,38 @@ public class ProcessRunner : IDisposable
                     {
                         ProcessCrashed?.Invoke(this, new ProcessEventArgs(_process.Id, exitTime, exitCode));
                         
+                        // Generate crash dump if enabled
+                        if (_crashDumpManager != null && _config.CrashDump?.Enabled == true)
+                        {
+                            try
+                            {
+                                _logger.LogInformation("Generating crash dump for crashed process: {Executable} (PID: {ProcessId}, Exit Code: {ExitCode})", 
+                                    _config.Process.Executable, _process.Id, exitCode);
+                                
+                                // Try to generate crash dump using the process handle (may not work if process has fully exited)
+                                var dumpFile = await _crashDumpManager.GenerateCrashDumpAsync(_process.Id, $"ExitCode{exitCode}");
+                                
+                                if (!string.IsNullOrEmpty(dumpFile))
+                                {
+                                    var crashDumpMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [INFO] Crash dump generated: {Path.GetFileName(dumpFile)}\n";
+                                    await _logManager.WriteStdoutAsync(crashDumpMessage);
+                                    _logger.LogInformation("Crash dump saved: {DumpFile}", dumpFile);
+                                }
+                                else
+                                {
+                                    var noDumpMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [WARNING] Failed to generate crash dump for process {_process.Id}\n";
+                                    await _logManager.WriteStderrAsync(noDumpMessage);
+                                    _logger.LogWarning("Failed to generate crash dump for process {ProcessId}", _process.Id);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Error generating crash dump for process {ProcessId}", _process.Id);
+                                var crashDumpErrorMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [ERROR] Crash dump generation error: {ex.Message}\n";
+                                await _logManager.WriteStderrAsync(crashDumpErrorMessage);
+                            }
+                        }
+                        
                         if (ShouldRestart())
                         {
                             _logger.LogInformation("Scheduling restart for: {Executable}", _config.Process.Executable);
@@ -451,6 +491,8 @@ public class ProcessRunner : IDisposable
         }
 
         _process?.Dispose();
+        _crashDumpManager?.Dispose();
+        _logManager.Dispose();
         _cancellationTokenSource.Dispose();
         
         _disposed = true;

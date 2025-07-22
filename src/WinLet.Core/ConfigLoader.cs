@@ -103,6 +103,12 @@ public class ConfigLoader
             config.ServiceAccount = MapServiceAccountConfig(serviceAccountTable);
         }
 
+        // Map crash dump configuration
+        if (tomlTable.TryGetValue("crash_dump", out var crashDumpObj) && crashDumpObj is TomlTable crashDumpTable)
+        {
+            config.CrashDump = MapCrashDumpConfig(crashDumpTable);
+        }
+
         return config;
     }
 
@@ -264,6 +270,40 @@ public class ConfigLoader
         }
 
         return serviceAccount;
+    }
+
+    private static CrashDumpConfig MapCrashDumpConfig(TomlTable crashDumpTable)
+    {
+        var crashDump = new CrashDumpConfig();
+
+        if (crashDumpTable.TryGetValue("enabled", out var enabled))
+            crashDump.Enabled = Convert.ToBoolean(enabled);
+            
+        if (crashDumpTable.TryGetValue("dump_path", out var dumpPath))
+            crashDump.DumpPath = dumpPath.ToString();
+            
+        if (crashDumpTable.TryGetValue("type", out var type))
+        {
+            if (Enum.TryParse<CrashDumpType>(type.ToString(), true, out var dumpType))
+                crashDump.Type = dumpType;
+        }
+        
+        if (crashDumpTable.TryGetValue("max_dump_files", out var maxFiles))
+            crashDump.MaxDumpFiles = Convert.ToInt32(maxFiles);
+            
+        if (crashDumpTable.TryGetValue("max_age_days", out var maxAge))
+            crashDump.MaxAgeDays = Convert.ToInt32(maxAge);
+            
+        if (crashDumpTable.TryGetValue("include_heap", out var includeHeap))
+            crashDump.IncludeHeap = Convert.ToBoolean(includeHeap);
+            
+        if (crashDumpTable.TryGetValue("compress_dumps", out var compress))
+            crashDump.CompressDumps = Convert.ToBoolean(compress);
+            
+        if (crashDumpTable.TryGetValue("dump_on_exception", out var dumpOnException))
+            crashDump.DumpOnException = Convert.ToBoolean(dumpOnException);
+
+        return crashDump;
     }
 
     private static void ValidateConfiguration(ServiceConfig config)
