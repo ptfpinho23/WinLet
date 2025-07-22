@@ -82,11 +82,32 @@ WinLet creates logs in your configured `log_path`:
 - `service-name.err.log` - Application stderr with timestamps  
 - `winlet.log` - Service management events
 
+## Crash Dumps
+
+WinLet can automatically generate crash dumps when applications fail:
+- **Mini dumps** with stack traces and module information
+- **Full memory dumps** for comprehensive debugging
+- **Automatic cleanup** based on age and count limits
+- **Compression support** to save disk space
+´
+
+Configuration example:
+
+```toml
+[crash_dump]
+enabled = true
+dump_path = "C:\\Logs\\CrashDumps"
+type = "Custom"              # MiniDump, MiniDumpWithData, FullDump, Custom
+max_dump_files = 5           # Keep recent dumps
+compress_dumps = true        # Save space
+```
+
 ## Features
 
 ✅ Any executable as Windows Service  
 ✅ Auto-restart policies  
 ✅ Logging Management  
+✅ Crash dump generation
 ✅ Handle Env Variables 
 ✅ UAC elevation handling  
 ✅ TOML configuration  
@@ -143,7 +164,7 @@ cd WinLet
 
 ### Misc
 - [ ] Add support for gMSA ACs
-- [ ] Crash dump gen
+- [x] Crash dump gen
 - [ ] Registry Configs 
 
 
