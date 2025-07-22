@@ -10,6 +10,7 @@ This guide covers all configuration options available in WinLet TOML files.
 - [Restart Policies](#restart-policies)
 - [Health Checks](#health-checks)
 - [Service Accounts](#service-accounts)
+- [Crash Dump Generation](#crash-dump-generation)
 - [Complete Examples](#complete-examples)
 
 ## Basic Service Configuration
@@ -228,6 +229,97 @@ allow_service_logon = true
 prompt = "Dialog"                     # GUI password prompt
 ```
 
+## Crash Dump Generation
+
+WinLet can automatically generate crash dumps when monitored processes crash or exit unexpectedly. This is useful for debugging application failures under a production setting.
+
+### Basic Crash Dump Configuration
+
+```toml
+[crash_dump]
+enabled = true                          # Enable crash dump generation
+dump_path = "C:\\Logs\\CrashDumps"     # Directory for dump files
+```
+
+### Crash Dump Types
+
+```toml
+[crash_dump]
+enabled = true
+type = "MiniDump"                      # MiniDump, MiniDumpWithData, FullDump, Custom
+```
+
+**Available Dump Types:**
+- **`MiniDump`** - Minimal information (stack traces, loaded modules) - smallest size
+- **`MiniDumpWithData`** - Includes data segments - medium size  
+- **`FullDump`** - Complete memory dump - largest size
+- **`Custom`** - Balanced dump with handle data, thread info, and process data
+
+### Advanced Crash Dump Configuration
+
+```toml
+[crash_dump]
+enabled = true
+dump_path = "C:\\CrashDumps\\MyService"
+type = "MiniDumpWithData"
+max_dump_files = 10                    # Keep only 10 most recent dumps
+max_age_days = 30                      # Delete dumps older than 30 days
+include_heap = false                   # Include heap memory (increases size)
+compress_dumps = true                  # Compress dump files with gzip
+dump_on_exception = true               # Generate dumps on unhandled exceptions
+```
+
+### Crash Dump File Management
+
+Crash dumps are automatically managed to prevent disk space issues:
+
+- **File naming**: `{service-name}_{process-id}_{reason}_{timestamp}.dmp`
+- **Compression**: Optional gzip compression (`.dmp.gz` extension)
+- **Cleanup**: Automatic removal based on count and age limits
+- **Location**: Stored in configured `dump_path` or service directory
+
+### Example Dump Files
+```
+MyWebApp_1234_ExitCode1_20241201_143022.dmp.gz
+MyWebApp_5678_ExitCode255_20241201_150315.dmp.gz
+MyWebApp_9012_ProcessCrash_20241201_152010.dmp.gz
+```
+
+### Production Crash Dump Example
+
+```toml
+[crash_dump]
+enabled = true
+dump_path = "D:\\Logs\\Production\\CrashDumps"
+type = "Custom"                        # Balanced information vs size
+max_dump_files = 5                     # Keep recent crashes only
+max_age_days = 7                       # Weekly cleanup
+include_heap = false                   # Don't include heap for security
+compress_dumps = true                  # Save disk space
+dump_on_exception = true               # Catch all failure modes
+```
+
+### Development Crash Dump Example
+
+```toml
+[crash_dump]
+enabled = true
+dump_path = "C:\\Dev\\Dumps"
+type = "FullDump"                      # Maximum debugging information
+max_dump_files = 20                    # Keep more for analysis
+max_age_days = 30                      # Longer retention
+include_heap = true                    # Include all memory
+compress_dumps = false                 # Faster generation, more disk space
+dump_on_exception = true
+```
+
+### Security Considerations
+
+- **Heap memory** may contain sensitive data (passwords, keys) - disable `include_heap` in production
+- **Full dumps** contain complete process memory - handle securely
+- **File permissions** - ensure dump directory has appropriate access controls
+- **Cleanup** - configure appropriate retention policies for your environment
+
 ## Complete Examples
 
 ### Production Web Server
@@ -278,6 +370,15 @@ failure_threshold = 3
 username = "DOMAIN\\WebAPIService"
 allow_service_logon = true
 prompt = "Console"
+
+[crash_dump]
+enabled = true
+dump_path = "C:\\Logs\\MyWebAPI\\CrashDumps"
+type = "Custom"
+max_dump_files = 3
+max_age_days = 14
+compress_dumps = true
+dump_on_exception = true
 ```
 
 ### Background Data Processor
@@ -389,4 +490,11 @@ window_seconds = 3600            # 1 hour window
 ### Monitoring
 - Enable health checks for web services
 - Use appropriate restart policies and attempt limits
-- Monitor log file sizes and rotation 
+- Monitor log file sizes and rotation
+
+### Crash Dumps
+- Use `Custom` type for balanced information vs file size in production
+- Enable compression to save disk space
+- Set appropriate retention policies (5-10 files, 7-30 days)
+- Consider security implications of heap dumps in production environments
+- Ensure crash dump directory has adequate disk space 

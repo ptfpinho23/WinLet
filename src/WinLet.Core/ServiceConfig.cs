@@ -25,6 +25,8 @@ public class ServiceConfig
     public HealthCheckConfig? HealthCheck { get; set; }
     
     public ServiceAccountConfig? ServiceAccount { get; set; }
+    
+    public CrashDumpConfig? CrashDump { get; set; }
 }
 
 /// <summary>
@@ -191,6 +193,52 @@ public class ServiceAccountConfig
     public PromptType? Prompt { get; set; }
 }
 
+/// <summary>
+/// Crash dump generation configuration
+/// </summary>
+public class CrashDumpConfig
+{
+    /// <summary>
+    /// Enable crash dump generation
+    /// </summary>
+    public bool Enabled { get; set; } = false;
+    
+    /// <summary>
+    /// Directory where crash dumps are stored
+    /// </summary>
+    public string? DumpPath { get; set; }
+    
+    /// <summary>
+    /// Type of crash dump to generate
+    /// </summary>
+    public CrashDumpType Type { get; set; } = CrashDumpType.MiniDump;
+    
+    /// <summary>
+    /// Maximum number of crash dumps to keep
+    /// </summary>
+    public int MaxDumpFiles { get; set; } = 5;
+    
+    /// <summary>
+    /// Maximum age in days for crash dumps before cleanup
+    /// </summary>
+    public int MaxAgeDays { get; set; } = 30;
+    
+    /// <summary>
+    /// Include heap memory in crash dumps
+    /// </summary>
+    public bool IncludeHeap { get; set; } = false;
+    
+    /// <summary>
+    /// Compress crash dump files
+    /// </summary>
+    public bool CompressDumps { get; set; } = true;
+    
+    /// <summary>
+    /// Generate dump on unhandled exceptions (in addition to process crashes)
+    /// </summary>
+    public bool DumpOnException { get; set; } = true;
+}
+
 public enum LogLevel
 {
     Trace,
@@ -252,4 +300,27 @@ public enum PromptType
 {
     Dialog,
     Console
-} 
+}
+
+public enum CrashDumpType
+{
+    /// <summary>
+    /// Mini dump with minimal information (stack traces, loaded modules)
+    /// </summary>
+    MiniDump,
+    
+    /// <summary>
+    /// Mini dump with data segments
+    /// </summary>
+    MiniDumpWithData,
+    
+    /// <summary>
+    /// Full memory dump (includes all process memory)
+    /// </summary>
+    FullDump,
+    
+    /// <summary>
+    /// Custom dump with specific data types
+    /// </summary>
+    Custom
+}
