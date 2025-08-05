@@ -58,6 +58,24 @@ public class WindowsServiceManager
             }
 
             Console.WriteLine($"Service created successfully");
+            
+
+            if (!string.IsNullOrEmpty(config.Description))
+            {
+                Console.WriteLine($"Setting service description...");
+                var descriptionResult = await RunServiceControlCommand("description", $"{config.Name} \"{config.Description}\"");
+                
+                if (descriptionResult.ExitCode != 0)
+                {
+                    Console.WriteLine($"Warning: Failed to set service description: {descriptionResult.Output}");
+                    _logger.LogWarning("Failed to set service description for {ServiceName}: {Error}", config.Name, descriptionResult.Output);
+                }
+                else
+                {
+                    Console.WriteLine($"Service description set successfully");
+                }
+            }
+            
             _logger.LogInformation("Service '{ServiceName}' installed successfully", config.Name);
         }
         catch (Exception ex)
@@ -240,10 +258,7 @@ public class WindowsServiceManager
             "type= own"
         };
 
-        if (!string.IsNullOrEmpty(config.Description))
-        {
-            // Description needs to be set separately using sc.exe description command
-        }
+        // Note: Description is set separately after service creation
 
         return string.Join(" ", arguments);
     }
