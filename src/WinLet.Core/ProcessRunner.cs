@@ -213,12 +213,21 @@ public class ProcessRunner : IDisposable
             startInfo.Environment[envVar.Key] = envVar.Value;
         }
 
-        // Validate working directory exists
+        // Ensure working directory exists, create if it doesn't
         if (!Directory.Exists(startInfo.WorkingDirectory))
         {
-            var error = $"Working directory not found: {startInfo.WorkingDirectory}";
-            _logger.LogError(error);
-            throw new InvalidOperationException(error);
+            _logger.LogInformation("Working directory does not exist, creating: {WorkingDirectory}", startInfo.WorkingDirectory);
+            try
+            {
+                Directory.CreateDirectory(startInfo.WorkingDirectory);
+                _logger.LogInformation("Successfully created working directory: {WorkingDirectory}", startInfo.WorkingDirectory);
+            }
+            catch (Exception ex)
+            {
+                var error = $"Failed to create working directory: {startInfo.WorkingDirectory}";
+                _logger.LogError(ex, error);
+                throw new InvalidOperationException(error, ex);
+            }
         }
 
         // Validate executable exists (for non-shell commands)
