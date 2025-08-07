@@ -30,6 +30,12 @@ public class Program
             options.ServiceName = "WinLet Service Host";
         });
 
+        builder.Services.Configure<HostOptions>(options =>
+        {
+            // Increase shutdown timeout to allow graceful process termination
+            options.ShutdownTimeout = TimeSpan.FromSeconds(30);
+        });
+
         // Add core services
         builder.Services.AddSingleton<LogManager>();
         
@@ -71,7 +77,17 @@ public class Program
         }
 
         var host = builder.Build();
-        await host.RunAsync();
+        
+        try
+        {
+            await host.RunAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // This is expected when the service is stopped via Windows Service Control Manager
+            // Log this as information rather than an error
+            Console.WriteLine("Service stopped via cancellation request");
+        }
     }
 }
 
