@@ -193,8 +193,12 @@ public class WinLetWorkerService : BackgroundService
             _logger.LogInformation("Stopping managed process...");
             try
             {
-                await _processRunner.StopAsync();
+                await _processRunner.StopAsync(cancellationToken);
                 _logger.LogInformation("Managed process stopped successfully");
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Process stop was cancelled - this is normal during service shutdown");
             }
             catch (Exception ex)
             {
@@ -207,6 +211,14 @@ public class WinLetWorkerService : BackgroundService
         }
         
         _logger.LogInformation("WinLet Worker Service stopped");
-        await base.StopAsync(cancellationToken);
+        
+        try
+        {
+            await base.StopAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Base service stop was cancelled");
+        }
     }
 } 
