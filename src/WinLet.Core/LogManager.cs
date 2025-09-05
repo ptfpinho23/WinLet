@@ -204,7 +204,10 @@ public class LogManager : IDisposable
         try
         {
             _logger.LogDebug("Performing time-based log roll");
-            PerformLogRoll(LogRollReason.Time);
+            // First, archive logs older than the configured number of days
+            ArchiveOldLogs();
+            // Then roll the current logs based on time
+            _ = PerformLogRoll(LogRollReason.Time);
         }
         catch (Exception ex)
         {
