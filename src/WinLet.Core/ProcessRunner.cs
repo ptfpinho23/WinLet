@@ -195,11 +195,13 @@ public class ProcessRunner : IDisposable
 
     private ProcessStartInfo CreateProcessStartInfo()
     {
+        var workDir = _config.Process.WorkingDirectory ?? Environment.CurrentDirectory;
+        var fileName=Path.Combine(workDir, _config.Process.Executable);
         var startInfo = new ProcessStartInfo
         {
-            FileName = _config.Process.Executable,
+            FileName = fileName,
             Arguments = _config.Process.Arguments ?? string.Empty,
-            WorkingDirectory = _config.Process.WorkingDirectory ?? Environment.CurrentDirectory,
+            WorkingDirectory = workDir,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -229,28 +231,7 @@ public class ProcessRunner : IDisposable
                 throw new InvalidOperationException(error, ex);
             }
         }
-
-        // Validate executable exists (for non-shell commands)
-        if (!Path.IsPathRooted(_config.Process.Executable))
-        {
-            // Check if executable is in PATH
-            var executablePath = FindExecutableInPath(_config.Process.Executable);
-            if (string.IsNullOrEmpty(executablePath))
-            {
-                var error = $"Executable '{_config.Process.Executable}' not found in PATH or working directory";
-                _logger.LogError(error);
-                throw new InvalidOperationException(error);
-            }
-            startInfo.FileName = executablePath;
-            _logger.LogDebug("Found executable in PATH: {ExecutablePath}", executablePath);
-        }
-        else if (!File.Exists(_config.Process.Executable))
-        {
-            var error = $"Executable file not found: {_config.Process.Executable}";
-            _logger.LogError(error);
-            throw new InvalidOperationException(error);
-        }
-
+        
         return startInfo;
     }
 

@@ -394,13 +394,12 @@ class Program
     }
 
     /// <summary>
-    /// Ensure the embedded WinLet service host binary exists next to the CLI and return its path.
-    /// If missing, extract the embedded resource to the expected service directory.
+    /// Ensure the embedded WinLet service host binary exists in a system location and return its path.
+    /// If missing, extract the embedded resource to %ProgramData%\WinLet\service.
     /// </summary>
     private static string EnsureServiceBinary()
     {
-        var basePath = Path.GetDirectoryName(Environment.ProcessPath) ?? "";
-        var serviceDir = Path.Combine(basePath, "service");
+        var serviceDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WinLet", "service");
         var serviceExePath = Path.Combine(serviceDir, "WinLetService.exe");
 
         try
@@ -420,11 +419,20 @@ class Program
 
         try
         {
+            // First attempt: in single-file mode, bundled content may be extracted to AppContext.BaseDirectory
+            var bundledPath = Path.Combine(AppContext.BaseDirectory, "service", "WinLetService.exe");
+            if (File.Exists(bundledPath))
+            {
+                File.Copy(bundledPath, serviceExePath, overwrite: true);
+                return serviceExePath;
+            }
+
+            // Fallback: extract from embedded resource if present
             var assembly = Assembly.GetExecutingAssembly();
-            // Find the embedded resource that ends with WinLetService.exe
-            var resourceName = assembly
-                .GetManifestResourceNames()
-                .FirstOrDefault(n => n.EndsWith("WinLetService.exe", StringComparison.OrdinalIgnoreCase));
+            var resourceName = assembly.GetManifestResourceNames()
+                .FirstOrDefault(n => string.Equals(n, "Embedded.WinLetService.exe", StringComparison.Ordinal))
+                ?? assembly.GetManifestResourceNames()
+                    .FirstOrDefault(n => n.EndsWith("WinLetService.exe", StringComparison.OrdinalIgnoreCase));
 
             if (string.IsNullOrEmpty(resourceName))
             {
@@ -433,7 +441,7 @@ class Program
                 Environment.Exit(1);
             }
 
-            using var resourceStream = assembly.GetManifestResourceStream(resourceName!);
+            using var resourceStream = assembly.GetManifestResourceStream(resourceName);
             if (resourceStream == null)
             {
                 Console.WriteLine("Error: Failed to open embedded WinLetService.exe resource stream.");
@@ -445,7 +453,7 @@ class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error: Failed to extract WinLetService.exe: {ex.Message}");
+            Console.WriteLine($"Error: Failed to obtain WinLetService.exe: {ex.Message}");
             Environment.Exit(1);
         }
 
