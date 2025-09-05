@@ -7,6 +7,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>WinLet</AssemblyName>
     
+    <!-- Single-file self-contained publish settings -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishTrimmed>false</PublishTrimmed>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    
     <!-- Assembly info -->
     <AssemblyTitle>WinLet - Windows Service Manager</AssemblyTitle>
     <AssemblyDescription>Modern Windows Service Manager with TOML configuration</AssemblyDescription>
@@ -27,5 +35,14 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
   </ItemGroup>
+
+  <!-- Build and embed the service host binary prior to compile -->
+  <Target Name="PrepareEmbeddedService" BeforeTargets="CoreCompile">
+    <Message Text="Publishing WinLet.Service for embedding..." Importance="high" />
+    <Exec Command="dotnet publish ..\WinLet.Service\WinLet.Service.csproj -c $(Configuration) -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:IncludeNativeLibrariesForSelfExtract=true -o $(MSBuildProjectDirectory)\service_build\win-x64\self-contained" />
+    <ItemGroup>
+      <EmbeddedResource Include="$(MSBuildProjectDirectory)\service_build\win-x64\self-contained\WinLetService.exe" />
+    </ItemGroup>
+  </Target>
 
 </Project> 

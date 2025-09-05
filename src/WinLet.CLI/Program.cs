@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Reflection;
 using System.Runtime.Versioning;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -92,19 +93,9 @@ class Program
                 
                 var serviceManager = CreateServiceManager();
                 
-                // Get the WinLet.Service executable path (should be in service subfolder)
-                var basePath = Path.GetDirectoryName(Environment.ProcessPath) ?? "";
-                var serviceExePath = Path.Combine(basePath, "service", "WinLetService.exe");
-                Console.WriteLine($"Looking for WinLetService.exe at: {serviceExePath}");
-                
-                if (!File.Exists(serviceExePath))
-                {
-                    Console.WriteLine("Error: WinLetService.exe not found. Please ensure the service is built and published.");
-                    Console.WriteLine($"   Expected location: {serviceExePath}");
-                    Console.WriteLine($"   Current directory: {Environment.CurrentDirectory}");
-                    Console.WriteLine($"   Process path: {Environment.ProcessPath}");
-                    Environment.Exit(1);
-                }
+                // Ensure the WinLetService.exe is available (extracts embedded copy if missing)
+                var serviceExePath = EnsureServiceBinary();
+                Console.WriteLine($"Using WinLetService.exe at: {serviceExePath}");
                 
                 Console.WriteLine($"Found WinLetService.exe at: {serviceExePath}");
                 Console.WriteLine($"Installing service: {config.Name}");
@@ -400,6 +391,65 @@ class Program
         var logger = serviceProvider.GetRequiredService<ILogger<WindowsServiceManager>>();
         
         return new WindowsServiceManager(logger);
+    }
+
+    /// <summary>
+    /// Ensure the embedded WinLet service host binary exists next to the CLI and return its path.
+    /// If missing, extract the embedded resource to the expected service directory.
+    /// </summary>
+    private static string EnsureServiceBinary()
+    {
+        var basePath = Path.GetDirectoryName(Environment.ProcessPath) ?? "";
+        var serviceDir = Path.Combine(basePath, "service");
+        var serviceExePath = Path.Combine(serviceDir, "WinLetService.exe");
+
+        try
+        {
+            Directory.CreateDirectory(serviceDir);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: Could not create service directory '{serviceDir}': {ex.Message}");
+            Environment.Exit(1);
+        }
+
+        if (File.Exists(serviceExePath))
+        {
+            return serviceExePath;
+        }
+
+        try
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            // Find the embedded resource that ends with WinLetService.exe
+            var resourceName = assembly
+                .GetManifestResourceNames()
+                .FirstOrDefault(n => n.EndsWith("WinLetService.exe", StringComparison.OrdinalIgnoreCase));
+
+            if (string.IsNullOrEmpty(resourceName))
+            {
+                Console.WriteLine("Error: Embedded WinLetService.exe not found in CLI assembly.");
+                Console.WriteLine("   Ensure the build embeds the service binary correctly.");
+                Environment.Exit(1);
+            }
+
+            using var resourceStream = assembly.GetManifestResourceStream(resourceName!);
+            if (resourceStream == null)
+            {
+                Console.WriteLine("Error: Failed to open embedded WinLetService.exe resource stream.");
+                Environment.Exit(1);
+            }
+
+            using var fileStream = new FileStream(serviceExePath, FileMode.Create, FileAccess.Write, FileShare.None);
+            resourceStream.CopyTo(fileStream);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: Failed to extract WinLetService.exe: {ex.Message}");
+            Environment.Exit(1);
+        }
+
+        return serviceExePath;
     }
 
     /// <summary>
