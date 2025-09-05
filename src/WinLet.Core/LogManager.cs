@@ -304,6 +304,10 @@ public class LogManager : IDisposable
             var stderrFile = _config.SeparateErrorLog ? GetLogFileName("err") : stdoutFile;
             OpenLogFiles(stdoutFile, stderrFile);
 
+            // Reset in-memory size counters after reopening to track the new file sizes
+            _currentStdoutSize = _stdoutStream?.Length ?? 0;
+            _currentStderrSize = _stderrStream?.Length ?? 0;
+
             // Clean up old files
             CleanupOldLogFiles();
 
@@ -345,14 +349,15 @@ public class LogManager : IDisposable
         var baseFileName = Path.GetFileNameWithoutExtension(filePath);
         var extension = Path.GetExtension(filePath);
 
-        // Find the next available number
+        // Find the next available numeric suffix without capping at KeepFiles.
+        // CleanupOldLogFiles will enforce retention after we roll.
         var rollNumber = 1;
-        string rolledFile;
-        do
+        string rolledFile = Path.Combine(directory, $"{baseFileName}.{rollNumber}{extension}");
+        while (File.Exists(rolledFile))
         {
-            rolledFile = Path.Combine(directory, $"{baseFileName}.{rollNumber}{extension}");
             rollNumber++;
-        } while (File.Exists(rolledFile) && rollNumber <= _config.KeepFiles);
+            rolledFile = Path.Combine(directory, $"{baseFileName}.{rollNumber}{extension}");
+        }
 
         try
         {
