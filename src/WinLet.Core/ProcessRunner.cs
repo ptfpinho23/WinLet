@@ -27,19 +27,19 @@ public class ProcessRunner : IDisposable
     public int? ProcessId => _process?.Id;
     public DateTime? StartTime { get; private set; }
 
-    public ProcessRunner(ServiceConfig config, ILogger<ProcessRunner> logger)
+    public ProcessRunner(ServiceConfig config, ILogger<ProcessRunner> logger, ILoggerFactory? loggerFactory = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         
-        // Create a simple logger for LogManager - we'll use a basic console logger
-        var logManagerLogger = new ConsoleLogger<LogManager>();
+        // Create LogManager logger - use provided factory or fall back to console
+        var logManagerLogger = loggerFactory?.CreateLogger<LogManager>() ?? new ConsoleLogger<LogManager>();
         _logManager = new LogManager(config.Logging, config.Name, logManagerLogger);
         
         // Create crash dump manager if crash dumps are enabled
         if (config.CrashDump?.Enabled == true)
         {
-            var crashDumpLogger = new ConsoleLogger<CrashDumpManager>();
+            var crashDumpLogger = loggerFactory?.CreateLogger<CrashDumpManager>() ?? new ConsoleLogger<CrashDumpManager>();
             _crashDumpManager = new CrashDumpManager(config.CrashDump, config.Name, crashDumpLogger);
         }
     }
@@ -494,7 +494,7 @@ public class ProcessRunner : IDisposable
 /// </summary>
 internal class ConsoleLogger<T> : ILogger<T>
 {
-    public IDisposable BeginScope<TState>(TState state) => null!;
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
     public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
     
     public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)

@@ -72,9 +72,8 @@ public class WinLetWorkerService : BackgroundService
             newLogger.LogInformation("Arguments: {Arguments}", config.Process.Arguments ?? "(none)");
             newLogger.LogInformation("Restart policy: {RestartPolicy} (max {MaxAttempts} attempts)", config.Restart.Policy, config.Restart.MaxAttempts);
             
-            // Create process runner
-            var processLoggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
-            _processRunner = new ProcessRunner(config, processLoggerFactory.CreateLogger<ProcessRunner>());
+            // Create process runner with the same logger factory that includes file logging
+            _processRunner = new ProcessRunner(config, loggerFactory.CreateLogger<ProcessRunner>(), loggerFactory);
             
             // Implement service-level restart logic
             int startupAttempts = 0;
@@ -88,7 +87,7 @@ public class WinLetWorkerService : BackgroundService
                 
                 try
                 {
-                    await _processRunner.StartAsync(stoppingToken);
+                    await _processRunner!.StartAsync(stoppingToken);
                     newLogger.LogInformation("Monitoring managed process...");
                     
                     // Keep the service running while the process is active

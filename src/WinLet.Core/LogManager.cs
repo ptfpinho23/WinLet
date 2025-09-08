@@ -1,6 +1,12 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
 namespace WinLet.Core;
@@ -14,17 +20,25 @@ public class LogManager : IDisposable
     private readonly string _serviceName;
     private readonly ILogger<LogManager> _logger;
     private readonly string _logDirectory;
-    
+
     private StreamWriter? _stdoutWriter;
     private StreamWriter? _stderrWriter;
     private FileStream? _stdoutStream;
     private FileStream? _stderrStream;
-    
+
     private Timer? _timeRollTimer;
+    private Timer? _delayedArchiveTimer;
     private DateTime _lastRollTime = DateTime.MinValue;
     private long _currentStdoutSize = 0;
     private long _currentStderrSize = 0;
-    
+    private readonly SemaphoreSlim _rollLock = new(1, 1);
+    private readonly SemaphoreSlim _ioLock = new(1, 1);
+    private int _sizeRollQueued = 0;
+
+    // Track the actual file paths we opened to avoid DateTime-based name drift
+    private string? _currentStdoutPath;
+    private string? _currentStderrPath;
+
     private bool _disposed = false;
 
     public LogManager(LoggingConfig config, string serviceName, ILogger<LogManager> logger)
@@ -32,15 +46,18 @@ public class LogManager : IDisposable
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _serviceName = serviceName ?? throw new ArgumentNullException(nameof(serviceName));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        
+
+        // Log successful initialization
+        _logger.LogInformation("LogManager initialized for service: {ServiceName}", serviceName);
+
         // Determine log directory
         _logDirectory = !string.IsNullOrEmpty(_config.LogPath) 
             ? _config.LogPath 
             : Path.GetDirectoryName(Environment.ProcessPath) ?? Environment.CurrentDirectory;
-        
+
         // Ensure log directory exists
         Directory.CreateDirectory(_logDirectory);
-        
+
         InitializeLogging();
     }
 
@@ -78,10 +95,10 @@ public class LogManager : IDisposable
                 SetupTimeRolling();
             }
 
-            // Archive old logs if configured
+            // Schedule initial archiving if configured (delayed to allow any existing handles to close)
             if (_config.ZipOlderThanDays.HasValue)
             {
-                ArchiveOldLogs();
+                ScheduleDelayedArchiving(5); // Shorter delay on startup
             }
         }
         catch (Exception ex)
@@ -97,7 +114,7 @@ public class LogManager : IDisposable
     private string GetLogFileName(string type)
     {
         var baseFileName = _serviceName;
-        
+
         // Use custom file names if specified
         if (type == "out" && !string.IsNullOrEmpty(_config.StdoutLogFile))
         {
@@ -148,21 +165,25 @@ public class LogManager : IDisposable
     /// </summary>
     private void OpenLogFiles(string stdoutFile, string stderrFile)
     {
-        // Open stdout log
-        _stdoutStream = new FileStream(stdoutFile, FileMode.Append, FileAccess.Write, FileShare.Read);
+        // Use ReadWrite sharing to allow archiving process to read and delete files
+        _stdoutStream = new FileStream(stdoutFile, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
         _stdoutWriter = new StreamWriter(_stdoutStream, Encoding.UTF8) { AutoFlush = true };
         _currentStdoutSize = _stdoutStream.Length;
+        _currentStdoutPath = stdoutFile;
 
-        // Open stderr log (may be same file as stdout)
         if (_config.SeparateErrorLog && stderrFile != stdoutFile)
         {
-            _stderrStream = new FileStream(stderrFile, FileMode.Append, FileAccess.Write, FileShare.Read);
+            _stderrStream = new FileStream(stderrFile, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
             _stderrWriter = new StreamWriter(_stderrStream, Encoding.UTF8) { AutoFlush = true };
             _currentStderrSize = _stderrStream.Length;
+            _currentStderrPath = stderrFile;
         }
         else
         {
             _stderrWriter = _stdoutWriter;
+            _stderrStream = null;
+            _currentStderrSize = _currentStdoutSize;
+            _currentStderrPath = _currentStdoutPath;
         }
     }
 
@@ -204,10 +225,11 @@ public class LogManager : IDisposable
         try
         {
             _logger.LogDebug("Performing time-based log roll");
-            // First, archive logs older than the configured number of days
-            ArchiveOldLogs();
-            // Then roll the current logs based on time
-            _ = PerformLogRoll(LogRollReason.Time);
+            PerformLogRoll(LogRollReason.Time).GetAwaiter().GetResult();
+
+            // (Optional) Deferred archive still okay; PerformLogRoll already triggers archive.
+            // Schedule delayed archiving after time roll
+            ScheduleDelayedArchiving();
         }
         catch (Exception ex)
         {
@@ -225,13 +247,28 @@ public class LogManager : IDisposable
 
         try
         {
-            await _stdoutWriter.WriteAsync(data);
-            _currentStdoutSize += Encoding.UTF8.GetByteCount(data);
-
-            // Check for size-based rolling
-            if (ShouldRollBySize(_currentStdoutSize))
+            bool needRoll = false;
+            await _ioLock.WaitAsync();
+            try
             {
-                await PerformLogRoll(LogRollReason.Size);
+                await _stdoutWriter.WriteAsync(data);
+                _currentStdoutSize += Encoding.UTF8.GetByteCount(data);
+
+                // Check for size-based rolling (queue in background)
+                needRoll = ShouldRollBySize(_currentStdoutSize);
+            }
+            finally
+            {
+                _ioLock.Release();
+            }
+
+            if (needRoll && Interlocked.CompareExchange(ref _sizeRollQueued, 1, 0) == 0)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try { await PerformLogRoll(LogRollReason.Size); }
+                    finally { Interlocked.Exchange(ref _sizeRollQueued, 0); }
+                });
             }
         }
         catch (Exception ex)
@@ -250,17 +287,30 @@ public class LogManager : IDisposable
 
         try
         {
-            await _stderrWriter.WriteAsync(data);
-            
-            if (_config.SeparateErrorLog && _stderrStream != null)
+            bool needRoll = false;
+            await _ioLock.WaitAsync();
+            try
             {
-                _currentStderrSize += Encoding.UTF8.GetByteCount(data);
+                await _stderrWriter.WriteAsync(data);
 
-                // Check for size-based rolling
-                if (ShouldRollBySize(_currentStderrSize))
+                if (_config.SeparateErrorLog && _stderrStream != null)
                 {
-                    await PerformLogRoll(LogRollReason.Size);
+                    _currentStderrSize += Encoding.UTF8.GetByteCount(data);
+                    needRoll = ShouldRollBySize(_currentStderrSize);
                 }
+            }
+            finally
+            {
+                _ioLock.Release();
+            }
+
+            if (needRoll && Interlocked.CompareExchange(ref _sizeRollQueued, 1, 0) == 0)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try { await PerformLogRoll(LogRollReason.Size); }
+                    finally { Interlocked.Exchange(ref _sizeRollQueued, 0); }
+                });
             }
         }
         catch (Exception ex)
@@ -286,32 +336,53 @@ public class LogManager : IDisposable
     /// </summary>
     private async Task PerformLogRoll(LogRollReason reason)
     {
+        await _rollLock.WaitAsync();
+        await _ioLock.WaitAsync();
         try
         {
             _logger.LogDebug("Performing log roll - Reason: {Reason}", reason);
 
-            // Close current writers
-            _stdoutWriter?.Close();
-            _stderrWriter?.Close();
-            _stdoutStream?.Close();
-            _stderrStream?.Close();
+            // Close current writers and flush
+            try { _stdoutWriter?.Flush(); } catch { }
+            try { _stderrWriter?.Flush(); } catch { }
+            try { _stdoutWriter?.Close(); } catch { }
+            try { _stderrWriter?.Close(); } catch { }
+            try { _stdoutStream?.Close(); } catch { }
+            try { _stderrStream?.Close(); } catch { }
 
-            // Roll the files
+            // Roll the files using the actual open paths (avoid recomputation)
             await RollLogFiles();
 
             // Reopen with new file names
+            // IMPORTANT: Recompute names after rolling to avoid reopening the just-rolled files.
             var stdoutFile = GetLogFileName("out");
             var stderrFile = _config.SeparateErrorLog ? GetLogFileName("err") : stdoutFile;
             OpenLogFiles(stdoutFile, stderrFile);
 
+<<<<<<< Updated upstream
             // Clean up old files
+=======
+            // Reset counters after reopening to track the new file sizes
+            _currentStdoutSize = _stdoutStream?.Length ?? 0;
+            _currentStderrSize = _stderrStream?.Length ?? 0;
+
+            // Clean up old files beyond retention
+>>>>>>> Stashed changes
             CleanupOldLogFiles();
 
             _lastRollTime = DateTime.Now;
+
+            // Schedule delayed archiving after roll to allow file handles to be released
+            ScheduleDelayedArchiving();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to perform log roll");
+        }
+        finally
+        {
+            _ioLock.Release();
+            _rollLock.Release();
         }
     }
 
@@ -320,15 +391,20 @@ public class LogManager : IDisposable
     /// </summary>
     private async Task RollLogFiles()
     {
-        var stdoutFile = GetLogFileName("out");
-        var stderrFile = _config.SeparateErrorLog ? GetLogFileName("err") : stdoutFile;
+        var stdoutFile = _currentStdoutPath;
+        var stderrFile = _currentStderrPath;
 
         await Task.Run(() =>
         {
-            RollFile(stdoutFile, "out");
-            if (_config.SeparateErrorLog && stderrFile != stdoutFile)
+            if (!string.IsNullOrEmpty(stdoutFile))
             {
-                RollFile(stderrFile, "err");
+                RollFile(stdoutFile, "out");
+            }
+            if (_config.SeparateErrorLog &&
+                !string.IsNullOrEmpty(stderrFile) &&
+                !string.Equals(stderrFile, stdoutFile, StringComparison.OrdinalIgnoreCase))
+            {
+                RollFile(stderrFile!, "err");
             }
         });
     }
@@ -372,14 +448,14 @@ public class LogManager : IDisposable
     {
         try
         {
-            // Use multiple patterns to catch all log file variations  
+            // Use multiple patterns to catch all log file variations
             var patterns = new[]
             {
                 $"{_serviceName}.*.log",           // Basic: service.out.log, service.err.log
                 $"{_serviceName}.*.*.log",         // Rolled: service.out.1.log, service.20241201.out.log
                 $"{_serviceName}.*.*.*.log"        // Complex: service.20241201.out.1.log (if both time + size rolling)
             };
-            
+
             var allLogFiles = new List<FileInfo>();
             foreach (var pattern in patterns)
             {
@@ -388,7 +464,7 @@ public class LogManager : IDisposable
                     .ToArray();
                 allLogFiles.AddRange(files);
             }
-            
+
             // Remove duplicates and sort by last write time
             var logFiles = allLogFiles
                 .GroupBy(f => f.FullName)
@@ -417,6 +493,72 @@ public class LogManager : IDisposable
     }
 
     /// <summary>
+    /// Check if a file is currently active (being written to by this LogManager)
+    /// </summary>
+    private bool IsCurrentlyActiveLogFile(string filePath)
+    {
+        return string.Equals(filePath, _currentStdoutPath, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(filePath, _currentStderrPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Schedule delayed archiving to allow file handles to be released
+    /// </summary>
+    private void ScheduleDelayedArchiving(int delaySeconds = 30)
+    {
+        if (!_config.ZipOlderThanDays.HasValue)
+        {
+            _logger.LogDebug("Skipping delayed archiving - ZipOlderThanDays not configured");
+            return;
+        }
+
+        // Cancel any existing delayed archive timer
+        if (_delayedArchiveTimer != null)
+        {
+            _logger.LogDebug("Cancelling existing delayed archive timer");
+            _delayedArchiveTimer.Dispose();
+        }
+
+        // Schedule new delayed archiving
+        var scheduledTime = DateTime.Now.AddSeconds(delaySeconds);
+        _delayedArchiveTimer = new Timer(OnDelayedArchive, null, TimeSpan.FromSeconds(delaySeconds), Timeout.InfiniteTimeSpan);
+        _logger.LogInformation("Scheduled delayed archiving in {DelaySeconds} seconds (at {ScheduledTime})", delaySeconds, scheduledTime);
+    }
+
+    /// <summary>
+    /// Handle delayed archiving callback
+    /// </summary>
+    private void OnDelayedArchive(object? state)
+    {
+        try
+        {
+            _logger.LogInformation("Performing delayed archiving (timer fired)");
+            ArchiveOldLogs();
+            _logger.LogInformation("Delayed archiving completed");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during delayed archiving");
+        }
+        finally
+        {
+            // Clean up timer after execution
+            try
+            {
+                _delayedArchiveTimer?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error disposing delayed archive timer");
+            }
+            finally
+            {
+                _delayedArchiveTimer = null;
+            }
+        }
+    }
+
+    /// <summary>
     /// Archive old log files
     /// </summary>
     private void ArchiveOldLogs()
@@ -426,8 +568,11 @@ public class LogManager : IDisposable
 
         try
         {
-            var cutoffDate = DateTime.Now.AddDays(-_config.ZipOlderThanDays.Value);
-            
+            var cutoffDate = DateTime.Now.AddDays(-_config.ZipOlderThanDays.Value).AddSeconds(-1);
+            var currentBucket = !string.IsNullOrEmpty(_config.TimePattern)
+                ? DateTime.Now.ToString(_config.TimePattern)
+                : null;
+
             // Use multiple patterns to catch all log file variations
             var patterns = new[]
             {
@@ -435,55 +580,225 @@ public class LogManager : IDisposable
                 $"{_serviceName}.*.*.log",         // Rolled: service.out.1.log, service.20241201.out.log
                 $"{_serviceName}.*.*.*.log"        // Complex: service.20241201.out.1.log (if both time + size rolling)
             };
-            
-            var oldFiles = new List<FileInfo>();
+
+            var candidates = new List<FileInfo>();
             foreach (var pattern in patterns)
             {
                 var files = Directory.GetFiles(_logDirectory, pattern)
                     .Select(f => new FileInfo(f))
-                    .Where(f => f.LastWriteTime < cutoffDate)
                     .ToArray();
-                oldFiles.AddRange(files);
+                candidates.AddRange(files);
             }
-            
+
             // Remove duplicates (in case a file matches multiple patterns)
-            oldFiles = oldFiles.GroupBy(f => f.FullName).Select(g => g.First()).ToList();
-            
-            // Exclude currently active log files to prevent conflicts
-            var currentStdoutFile = GetLogFileName("out");
-            var currentStderrFile = _config.SeparateErrorLog ? GetLogFileName("err") : currentStdoutFile;
-            
-            oldFiles = oldFiles.Where(f => 
-                !string.Equals(f.FullName, currentStdoutFile, StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(f.FullName, currentStderrFile, StringComparison.OrdinalIgnoreCase))
+            var distinct = candidates.GroupBy(f => f.FullName).Select(g => g.First()).ToList();
+
+            // Exclude currently active log files using tracked paths
+            var currentStdoutFile = _currentStdoutPath;
+            var currentStderrFile = _currentStderrPath ?? _currentStdoutPath;
+
+            var oldFiles = distinct.Where(f =>
+                    !string.Equals(f.FullName, currentStdoutFile, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(f.FullName, currentStderrFile, StringComparison.OrdinalIgnoreCase) &&
+                    (
+                        // Standard age-based inclusion
+                        f.LastWriteTime < cutoffDate ||
+                        // Immediate-roll inclusion when ZipOlderThanDays == 0 and we have a time bucket pattern
+                        (_config.ZipOlderThanDays.GetValueOrDefault() == 0 && currentBucket != null &&
+                         !f.Name.Contains(currentBucket, StringComparison.OrdinalIgnoreCase))
+                    ))
                 .ToList();
+
+            _logger.LogInformation("Archive scan found {Count} candidate files, {OldCount} old files to archive", distinct.Count, oldFiles.Count);
+            _logger.LogInformation("Current stdout: {Stdout}, stderr: {Stderr}", currentStdoutFile, currentStderrFile);
+            _logger.LogInformation("Cutoff date: {CutoffDate}, Current bucket: {CurrentBucket}, ZipOlderThanDays: {ZipDays}", cutoffDate, currentBucket, _config.ZipOlderThanDays);
+
+            foreach (var f in distinct)
+            {
+                var isOld = f.LastWriteTime < cutoffDate ||
+                           (_config.ZipOlderThanDays.GetValueOrDefault() == 0 && currentBucket != null &&
+                            !f.Name.Contains(currentBucket, StringComparison.OrdinalIgnoreCase));
+                var isActive = string.Equals(f.FullName, currentStdoutFile, StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(f.FullName, currentStderrFile, StringComparison.OrdinalIgnoreCase);
+                _logger.LogInformation("File: {File}, LastWrite: {LastWrite}, IsOld: {IsOld}, IsActive: {IsActive}, Size: {Size}", 
+                    f.Name, f.LastWriteTime, isOld, isActive, f.Length);
+            }
 
             if (!oldFiles.Any())
             {
-                _logger.LogDebug("No old log files found for archiving");
+                _logger.LogInformation("No old log files found for archiving");
                 return;
             }
 
-            var zipFileName = $"{_serviceName}.{DateTime.Now.ToString(_config.ZipDateFormat ?? "yyyyMM")}.zip";
-            var zipPath = Path.Combine(_logDirectory, zipFileName);
-            
-            // If zip file already exists, append timestamp to make it unique
-            if (File.Exists(zipPath))
-            {
-                var timestamp = DateTime.Now.ToString("HHmmss");
-                zipFileName = $"{_serviceName}.{DateTime.Now.ToString(_config.ZipDateFormat ?? "yyyyMM")}.{timestamp}.zip";
-                zipPath = Path.Combine(_logDirectory, zipFileName);
-            }
+            // Zip per day (based on file's last write date), grouping by yyyyMMdd
+            var dateFormat = _config.ZipDateFormat ?? "yyyyMMdd";
+            var groups = oldFiles
+                .GroupBy(f => f.LastWriteTime.ToString(dateFormat))
+                .ToList();
 
-            using var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create);
-            foreach (var file in oldFiles)
+            foreach (var g in groups)
             {
-                zip.CreateEntryFromFile(file.FullName, file.Name);
-                file.Delete();
-                _logger.LogDebug("Archived and deleted log file: {File}", file.FullName);
-            }
+                var filesToAdd = g.ToList();
+                if (filesToAdd.Count == 0) continue;
 
-            _logger.LogInformation("Archived {Count} old log files to {ZipFile}", oldFiles.Count, zipFileName);
+                var zipFileName = $"{_serviceName}.{g.Key}.zip";
+                var zipPath = Path.Combine(_logDirectory, zipFileName);
+                var addedAny = false;
+                var filesToDelete = new List<string>();
+
+                _logger.LogInformation("Processing zip group {DateKey} with {FileCount} files: {Files}", 
+                    g.Key, filesToAdd.Count, string.Join(", ", filesToAdd.Select(f => f.Name)));
+
+                try
+                {
+                    // Use Create mode for new files, Update mode for existing files
+                    var zipMode = File.Exists(zipPath) ? ZipArchiveMode.Update : ZipArchiveMode.Create;
+                    _logger.LogInformation("Opening zip {ZipPath} in {Mode} mode", zipPath, zipMode);
+                    using var zip = ZipFile.Open(zipPath, zipMode);
+
+                    foreach (var file in filesToAdd)
+                    {
+                        try
+                        {
+                            _logger.LogInformation("Processing file for archiving: {File}", file.FullName);
+
+                            // Verify file still exists and is not currently being written to
+                            if (!File.Exists(file.FullName))
+                            {
+                                _logger.LogWarning("File no longer exists, skipping: {File}", file.FullName);
+                                continue;
+                            }
+
+                            // Check if this is a currently active log file (skip archiving active files)
+                            if (IsCurrentlyActiveLogFile(file.FullName))
+                            {
+                                _logger.LogInformation("File is currently active, skipping: {File}", file.FullName);
+                                continue;
+                            }
+
+                            // Check if entry already exists in zip to avoid duplicates (only for Update mode)
+                            var entryName = file.Name;
+                            _logger.LogInformation("[VERSION_CHECK_v2025_09_08_15_16] ZipMode is: {ZipMode}, checking duplicates for: {EntryName}", zipMode, entryName);
+                            
+                            if (zipMode == ZipArchiveMode.Update)
+                            {
+                                _logger.LogInformation("[VERSION_CHECK_v2025_09_08_15_16] In Update mode, checking for existing entries");
+                                try
+                                {
+                                    if (zip.Entries.Any(e => e.Name.Equals(entryName, StringComparison.OrdinalIgnoreCase)))
+                                    {
+                                        _logger.LogInformation("File already exists in zip, skipping: {File}", file.FullName);
+                                        filesToDelete.Add(file.FullName); // Still mark for deletion
+                                        continue;
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, "[VERSION_CHECK_v2025_09_08_15_16] Could not check zip entries in Update mode, proceeding with archiving: {File}", file.FullName);
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogInformation("[VERSION_CHECK_v2025_09_08_15_16] In Create mode, skipping duplicate check");
+                            }
+
+                            // Try to open file with appropriate sharing - if it fails, the file is locked
+                            _logger.LogInformation("Opening file for reading: {File}", file.FullName);
+                            using var src = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                            var entry = zip.CreateEntry(entryName, CompressionLevel.Optimal);
+                            using var entryStream = entry.Open();
+                            _logger.LogInformation("Copying {Bytes} bytes from {File} to zip", src.Length, file.FullName);
+                            src.CopyTo(entryStream);
+                            addedAny = true;
+                            filesToDelete.Add(file.FullName);
+                            
+                            _logger.LogInformation("Successfully added file to zip: {File}", file.FullName);
+                        }
+                        catch (Exception exFile)
+                        {
+                            _logger.LogWarning(exFile, "Failed to archive file: {File}", file.FullName);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to open/create zip for group {DateKey}: {ZipPath}", g.Key, zipPath);
+                    // Don't delete files if zip creation failed
+                    filesToDelete.Clear();
+                }
+
+                // Only delete files that were successfully added to zip
+                foreach (var fileToDelete in filesToDelete)
+                {
+                    try
+                    {
+                        // Skip deletion if file is currently active
+                        if (IsCurrentlyActiveLogFile(fileToDelete))
+                        {
+                            _logger.LogDebug("Skipping deletion of active log file: {File}", fileToDelete);
+                            continue;
+                        }
+
+                        // Try delete with retries and better error handling
+                        var deleted = false;
+                        Exception? lastException = null;
+                        
+                        for (int i = 0; i < 5 && !deleted; i++)
+                        {
+                            try 
+                            { 
+                                // Test if file can be opened for deletion first
+                                using (var testStream = new FileStream(fileToDelete, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                                {
+                                    // If we can open it with Delete sharing, deletion should work
+                                }
+                                
+                                File.Delete(fileToDelete); 
+                                deleted = true; 
+                            }
+                            catch (IOException ex) when (i < 4) 
+                            { 
+                                lastException = ex;
+                                Thread.Sleep(500 + (i * 200)); // Progressive backoff
+                            }
+                            catch (UnauthorizedAccessException ex) when (i < 4)
+                            {
+                                lastException = ex;
+                                Thread.Sleep(500 + (i * 200)); // Progressive backoff
+                            }
+                        }
+                        
+                        if (deleted)
+                            _logger.LogDebug("Archived and deleted log file: {File}", fileToDelete);
+                        else
+                        {
+                            _logger.LogWarning("Archived but could not delete log file after 5 attempts (in use by another process?): {File}. Last error: {Error}", 
+                                fileToDelete, lastException?.Message ?? "Unknown");
+                        }
+                    }
+                    catch (Exception exDelete)
+                    {
+                        _logger.LogWarning(exDelete, "Failed to delete archived file: {File}", fileToDelete);
+                    }
+                }
+
+                // Remove empty zip if nothing was added
+                try
+                {
+                    if (!addedAny && File.Exists(zipPath))
+                    {
+                        File.Delete(zipPath);
+                        _logger.LogDebug("Deleted empty zip file: {ZipPath}", zipPath);
+                    }
+                }
+                catch (Exception exDel)
+                {
+                    _logger.LogWarning(exDel, "Failed to delete empty zip {Zip}", zipFileName);
+                }
+
+                if (addedAny)
+                    _logger.LogInformation("Archived {Count} files to {ZipFile}", filesToDelete.Count, zipFileName);
+            }
         }
         catch (Exception ex)
         {
@@ -497,6 +812,7 @@ public class LogManager : IDisposable
             return;
 
         _timeRollTimer?.Dispose();
+        _delayedArchiveTimer?.Dispose();
         _stdoutWriter?.Close();
         _stderrWriter?.Close();
         _stdoutStream?.Close();
@@ -514,4 +830,4 @@ public enum LogRollReason
     Size,
     Time,
     Manual
-} 
+}
