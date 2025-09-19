@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 
@@ -196,7 +197,11 @@ public class ProcessRunner : IDisposable
     private ProcessStartInfo CreateProcessStartInfo()
     {
         var workDir = _config.Process.WorkingDirectory ?? Environment.CurrentDirectory;
-        var fileName=Path.Combine(workDir, _config.Process.Executable);
+        
+        // Handle executable path correctly - don't combine with working directory if it's already absolute
+        var executable = _config.Process.Executable;
+        var fileName = Path.IsPathRooted(executable) ? executable : Path.Combine(workDir, executable);
+        
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
@@ -209,7 +214,43 @@ public class ProcessRunner : IDisposable
             CreateNoWindow = true
         };
 
-        // Add environment variables
+        // Inherit system environment variables first (including PATH)
+        foreach (DictionaryEntry envVar in Environment.GetEnvironmentVariables())
+        {
+            if (envVar.Key is string key && envVar.Value is string value)
+            {
+                startInfo.Environment[key] = value;
+            }
+        }
+
+        // Add the executable's directory to PATH so it can find related binaries
+        var executableDir = Path.GetDirectoryName(fileName);
+        if (!string.IsNullOrEmpty(executableDir))
+        {
+            var currentPath = startInfo.Environment.TryGetValue("PATH", out var pathValue) ? pathValue : string.Empty;
+            
+            // Check if executable directory is already in PATH
+            var pathDirectories = currentPath?.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
+            var executableDirNormalized = Path.GetFullPath(executableDir).TrimEnd(Path.DirectorySeparatorChar);
+            
+            var alreadyInPath = pathDirectories.Any(dir => 
+                string.Equals(Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar), 
+                             executableDirNormalized, 
+                             StringComparison.OrdinalIgnoreCase));
+            
+            if (!alreadyInPath)
+            {
+                // Add executable directory to the beginning of PATH
+                var newPath = string.IsNullOrEmpty(currentPath) 
+                    ? executableDir 
+                    : $"{executableDir}{Path.PathSeparator}{currentPath}";
+                
+                startInfo.Environment["PATH"] = newPath;
+                _logger.LogDebug("Added executable directory to PATH: {ExecutableDir}", executableDir);
+            }
+        }
+
+        // Then add/override with custom environment variables from config
         foreach (var envVar in _config.Process.Environment)
         {
             startInfo.Environment[envVar.Key] = envVar.Value;
