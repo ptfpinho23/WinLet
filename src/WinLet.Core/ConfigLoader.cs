@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.RegularExpressions;
 using Tomlyn;
 using Tomlyn.Model;
 
@@ -43,7 +44,9 @@ public class ConfigLoader
     {
         try
         {
-            var tomlTable = Toml.ToModel(tomlContent);
+            // Preprocess TOML content to handle Windows paths with backslashes
+            var processedContent = PreprocessTomlContent(tomlContent);
+            var tomlTable = Toml.ToModel(processedContent);
             var config = MapToServiceConfig(tomlTable);
             
             ValidateConfiguration(config);
@@ -52,8 +55,38 @@ public class ConfigLoader
         }
         catch (Exception ex) when (!(ex is ConfigurationException))
         {
-            throw new ConfigurationException($"Failed to parse TOML configuration: {ex.Message}", ex);
+            var message = ex.Message;
+            
+            // Provide helpful guidance for common TOML path issues
+            if (message.Contains("Unexpected escape character") && message.Contains("in string"))
+            {
+                message += "\n\nTIP: Windows paths in TOML require proper escaping. Use one of these formats";
+            }
+            
+            throw new ConfigurationException($"Failed to parse TOML configuration: {message}", ex);
         }
+    }
+
+    /// <summary>
+    /// Preprocess TOML content to handle Windows paths with backslashes
+    /// </summary>
+    /// <param name="tomlContent">Original TOML content</param>
+    /// <returns>Processed TOML content with properly escaped backslashes</returns>
+    private static string PreprocessTomlContent(string tomlContent)
+    {
+        // Pattern to match Windows paths in double quotes that contain backslashes
+        // This matches strings like "C:\Program Files\..." or "C:\Users\..." or "\\server\share\..."
+        var windowsPathPattern = @"""([A-Za-z]:\\[^""]*?|\\\\[^""]*?)""";
+        
+        var result = Regex.Replace(tomlContent, windowsPathPattern, match =>
+        {
+            var originalPath = match.Groups[1].Value;
+            // Escape backslashes for TOML parsing
+            var escapedPath = originalPath.Replace(@"\", @"\\");
+            return $"\"{escapedPath}\"";
+        });
+
+        return result;
     }
 
     private static ServiceConfig MapToServiceConfig(TomlTable tomlTable)

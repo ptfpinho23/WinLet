@@ -7,6 +7,7 @@
     <UserSecretsId>dotnet-WinLet-Service-7d44c50c-72e0-4869-9d9b-4f2336ee2fd4</UserSecretsId>
     <OutputType>Exe</OutputType>
     <AssemblyName>WinLetService</AssemblyName>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     
     <!-- Assembly info -->
     <AssemblyTitle>WinLetService - Windows Service Host</AssemblyTitle>
