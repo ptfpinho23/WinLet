@@ -231,28 +231,21 @@ public class WindowsServiceManager
 
     private string BuildCreateServiceArguments(ServiceConfig config, string executablePath, string? sourceConfigPath = null)
     {
-        // We need to pass the config file path to the service so it knows what to run
-        // Store the config file path in a predictable location for the service to find
-        var configDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WinLet");
-        Directory.CreateDirectory(configDir);
-        
-        var serviceConfigPath = Path.Combine(configDir, $"{config.Name}.toml");
-        
-        // Copy the original config file to the service config location if provided
-        if (!string.IsNullOrEmpty(sourceConfigPath) && File.Exists(sourceConfigPath))
+        // Pass the original config file path directly to the service
+        if (string.IsNullOrEmpty(sourceConfigPath) || !File.Exists(sourceConfigPath))
         {
-            _logger.LogInformation("Copying config from {SourcePath} to {DestPath}", sourceConfigPath, serviceConfigPath);
-            File.Copy(sourceConfigPath, serviceConfigPath, overwrite: true);
+            throw new InvalidOperationException("Source config path is required and must exist to install the service.");
         }
-        else
-        {
-            _logger.LogWarning("No source config path provided or file doesn't exist. Service may not start properly.");
-        }
+
+        // Convert to absolute path to ensure service can always find it
+        var absoluteConfigPath = Path.GetFullPath(sourceConfigPath);
+        
+        _logger.LogInformation("Service will use config file at: {ConfigPath}", absoluteConfigPath);
         
         var arguments = new List<string>
         {
             config.Name,
-            $"binPath= \"{executablePath} --config-path \\\"{serviceConfigPath}\\\"\"",
+            $"binPath= \"{executablePath} --config-path \\\"{absoluteConfigPath}\\\"\"",
             $"DisplayName= \"{config.DisplayName}\"",
             "start= auto",
             "type= own"
