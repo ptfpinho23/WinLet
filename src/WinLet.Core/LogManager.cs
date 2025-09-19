@@ -359,15 +359,7 @@ public class LogManager : IDisposable
             var stderrFile = _config.SeparateErrorLog ? GetLogFileName("err") : stdoutFile;
             OpenLogFiles(stdoutFile, stderrFile);
 
-<<<<<<< Updated upstream
             // Clean up old files
-=======
-            // Reset counters after reopening to track the new file sizes
-            _currentStdoutSize = _stdoutStream?.Length ?? 0;
-            _currentStderrSize = _stderrStream?.Length ?? 0;
-
-            // Clean up old files beyond retention
->>>>>>> Stashed changes
             CleanupOldLogFiles();
 
             _lastRollTime = DateTime.Now;

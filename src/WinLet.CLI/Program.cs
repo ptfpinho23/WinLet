@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Reflection;
 using System.Runtime.Versioning;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WinLet.Core;
 
@@ -13,6 +14,12 @@ class Program
     [SupportedOSPlatform("windows")]
     static async Task<int> Main(string[] args)
     {
+        // Check if running as Windows Service (indicated by --config-path argument)
+        if (args.Length >= 2 && args[0] == "--config-path")
+        {
+            return await RunAsWindowsService(args);
+        }
+        
         // Convert relative config paths to absolute paths before UAC elevation
         args = ConvertConfigPathsToAbsolute(args);
         
@@ -46,6 +53,94 @@ class Program
         rootCommand.AddCommand(CreateLogsCommand());
 
         return await rootCommand.InvokeAsync(args);
+    }
+
+    /// <summary>
+    /// Run as Windows Service when called with --config-path argument
+    /// </summary>
+    private static async Task<int> RunAsWindowsService(string[] args)
+    {
+        var builder = Host.CreateApplicationBuilder(args);
+        
+        // Parse command line arguments to get config path
+        string? configPath = null;
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--config-path" && i + 1 < args.Length)
+            {
+                configPath = args[i + 1];
+                break;
+            }
+        }
+        
+        // Add Windows Services support
+        builder.Services.AddWindowsService(options =>
+        {
+            options.ServiceName = "WinLet Service Host";
+        });
+
+        builder.Services.Configure<HostOptions>(options =>
+        {
+            // Increase shutdown timeout to allow graceful process termination
+            options.ShutdownTimeout = TimeSpan.FromSeconds(30);
+        });
+
+        // Add core services
+        builder.Services.AddSingleton<LogManager>();
+        
+        // Add the config path as a singleton so the worker service can access it
+        builder.Services.AddSingleton(provider => new ConfigPathService(configPath));
+        
+        // Add the worker service
+        builder.Services.AddHostedService<WinLetWorkerService>();
+
+        // Configure logging
+        builder.Logging.ClearProviders();
+        builder.Logging.AddConsole();
+        
+        // Write startup info to temp log file initially
+        try
+        {
+            var tempLogDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WinLet", "Logs");
+            Directory.CreateDirectory(tempLogDir);
+            var tempLogFile = Path.Combine(tempLogDir, "service.log");
+            var startupMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] WinLet Service starting with args: [{string.Join(", ", args)}]\n";
+            File.AppendAllText(tempLogFile, startupMessage);
+        }
+        catch (Exception ex)
+        {
+            // Can't write to log file, continue anyway
+            Console.WriteLine($"Could not write to log file: {ex.Message}");
+        }
+        
+        try
+        {
+            // Event log requires admin privileges to create sources, so skip it
+            // builder.Logging.AddEventLog(); 
+        }
+        catch (Exception)
+        {
+            // Event log might not be accessible, that's OK
+        }
+
+        var host = builder.Build();
+        
+        try
+        {
+            await host.RunAsync();
+            return 0;
+        }
+        catch (OperationCanceledException)
+        {
+            // This is expected when the service is stopped via Windows Service Control Manager
+            Console.WriteLine("Service stopped via cancellation request");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Service failed: {ex.Message}");
+            return 1;
+        }
     }
 
     private static Command CreateInstallCommand()
@@ -93,11 +188,10 @@ class Program
                 
                 var serviceManager = CreateServiceManager();
                 
-                // Ensure the WinLetService.exe is available (extracts embedded copy if missing)
-                var serviceExePath = EnsureServiceBinary();
-                Console.WriteLine($"Using WinLetService.exe at: {serviceExePath}");
+                // Use the current executable as the service binary
+                var serviceExePath = Environment.ProcessPath ?? Assembly.GetExecutingAssembly().Location;
+                Console.WriteLine($"Using WinLet.exe at: {serviceExePath}");
                 
-                Console.WriteLine($"Found WinLetService.exe at: {serviceExePath}");
                 Console.WriteLine($"Installing service: {config.Name}");
                 
                 await serviceManager.InstallServiceAsync(config, serviceExePath, configPath);
@@ -393,72 +487,6 @@ class Program
         return new WindowsServiceManager(logger);
     }
 
-    /// <summary>
-    /// Ensure the embedded WinLet service host binary exists in a system location and return its path.
-    /// If missing, extract the embedded resource to %ProgramData%\WinLet\service.
-    /// </summary>
-    private static string EnsureServiceBinary()
-    {
-        var serviceDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WinLet", "service");
-        var serviceExePath = Path.Combine(serviceDir, "WinLetService.exe");
-
-        try
-        {
-            Directory.CreateDirectory(serviceDir);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error: Could not create service directory '{serviceDir}': {ex.Message}");
-            Environment.Exit(1);
-        }
-
-        if (File.Exists(serviceExePath))
-        {
-            return serviceExePath;
-        }
-
-        try
-        {
-            // First attempt: in single-file mode, bundled content may be extracted to AppContext.BaseDirectory
-            var bundledPath = Path.Combine(AppContext.BaseDirectory, "service", "WinLetService.exe");
-            if (File.Exists(bundledPath))
-            {
-                File.Copy(bundledPath, serviceExePath, overwrite: true);
-                return serviceExePath;
-            }
-
-            // Fallback: extract from embedded resource if present
-            var assembly = Assembly.GetExecutingAssembly();
-            var resourceName = assembly.GetManifestResourceNames()
-                .FirstOrDefault(n => string.Equals(n, "Embedded.WinLetService.exe", StringComparison.Ordinal))
-                ?? assembly.GetManifestResourceNames()
-                    .FirstOrDefault(n => n.EndsWith("WinLetService.exe", StringComparison.OrdinalIgnoreCase));
-
-            if (string.IsNullOrEmpty(resourceName))
-            {
-                Console.WriteLine("Error: Embedded WinLetService.exe not found in CLI assembly.");
-                Console.WriteLine("   Ensure the build embeds the service binary correctly.");
-                Environment.Exit(1);
-            }
-
-            using var resourceStream = assembly.GetManifestResourceStream(resourceName);
-            if (resourceStream == null)
-            {
-                Console.WriteLine("Error: Failed to open embedded WinLetService.exe resource stream.");
-                Environment.Exit(1);
-            }
-
-            using var fileStream = new FileStream(serviceExePath, FileMode.Create, FileAccess.Write, FileShare.None);
-            resourceStream.CopyTo(fileStream);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error: Failed to obtain WinLetService.exe: {ex.Message}");
-            Environment.Exit(1);
-        }
-
-        return serviceExePath;
-    }
 
     /// <summary>
     /// Convert relative config file paths to absolute paths in command line arguments

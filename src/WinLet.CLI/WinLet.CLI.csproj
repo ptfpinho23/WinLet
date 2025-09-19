@@ -35,30 +35,10 @@
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.EventLog" Version="8.0.1" />
   </ItemGroup>
 
-  <!-- Where to publish the embedded service during build -->
-  <PropertyGroup>
-    <EmbeddedServiceOut>$(MSBuildProjectDirectory)\embedded_service\win-x64\self-contained\</EmbeddedServiceOut>
-  </PropertyGroup>
-
-  <!-- Include the published service exe as bundled content (extracted at runtime in single-file) -->
-  <ItemGroup>
-    <Content Include="$(EmbeddedServiceOut)WinLetService.exe">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
-      <TargetPath>service\WinLetService.exe</TargetPath>
-      <ExcludeFromSingleFile>false</ExcludeFromSingleFile>
-    </Content>
-  </ItemGroup>
-
-  <!-- Build the service host before building the CLI so the resource exists -->
-  <Target Name="BuildEmbeddedService" BeforeTargets="CoreCompile">
-    <MakeDir Directories="$(EmbeddedServiceOut)" />
-    <Message Text="Publishing WinLet.Service for embedding to $(EmbeddedServiceOut) ..." Importance="high" />
-    <MSBuild Projects="..\WinLet.Service\WinLet.Service.csproj"
-             Targets="Publish"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;PublishTrimmed=false;IncludeNativeLibrariesForSelfExtract=true;PublishDir=$(EmbeddedServiceOut)" />
-  </Target>
 
 </Project> 
