@@ -394,21 +394,21 @@ class Program
     }
 
     /// <summary>
-    /// Ensure the embedded WinLet service host binary exists in a system location and return its path.
-    /// If missing, extract the embedded resource to %ProgramData%\WinLet\service.
+    /// Ensure the embedded WinLet service host binary exists and return its path.
+    /// Extract to the same directory as the CLI executable for simplicity.
     /// </summary>
     private static string EnsureServiceBinary()
     {
-        var serviceDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WinLet", "service");
-        var serviceExePath = Path.Combine(serviceDir, "WinLetService.exe");
+        var cliDirectory = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        var serviceExePath = Path.Combine(cliDirectory, "WinLetService.exe");
 
         try
         {
-            Directory.CreateDirectory(serviceDir);
+            Directory.CreateDirectory(cliDirectory);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error: Could not create service directory '{serviceDir}': {ex.Message}");
+            Console.WriteLine($"Error: Could not create service directory '{cliDirectory}': {ex.Message}");
             Environment.Exit(1);
         }
 
