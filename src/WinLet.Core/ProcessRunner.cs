@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 
 namespace WinLet.Core;
@@ -9,6 +10,53 @@ namespace WinLet.Core;
 /// </summary>
 public class ProcessRunner : IDisposable
 {
+    // Windows API declarations for sending CTRL+C to console processes
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(uint dwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool FreeConsole();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetConsoleCtrlHandler(ConsoleCtrlDelegate? HandlerRoutine, bool Add);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GenerateConsoleCtrlEvent(uint dwCtrlEvent, uint dwProcessGroupId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    private delegate bool ConsoleCtrlDelegate(uint CtrlType);
+
+    private const uint CTRL_C_EVENT = 0;
+    private const uint CTRL_BREAK_EVENT = 1;
+    private const uint TH32CS_SNAPPROCESS = 0x00000002;
+    private const IntPtr INVALID_HANDLE_VALUE = (IntPtr)(-1);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PROCESSENTRY32
+    {
+        public uint dwSize;
+        public uint cntUsage;
+        public uint th32ProcessID;
+        public IntPtr th32DefaultHeapID;
+        public uint th32ModuleID;
+        public uint cntThreads;
+        public uint th32ParentProcessID;
+        public int pcPriClassBase;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szExeFile;
+    }
     private readonly ServiceConfig _config;
     private readonly ILogger<ProcessRunner> _logger;
     private readonly LogManager _logManager;
@@ -158,14 +206,36 @@ public class ProcessRunner : IDisposable
 
         try
         {
-            // Try graceful shutdown first
-            if (!_process.CloseMainWindow())
+            // Try graceful shutdown first - attempt GUI close
+            bool sentGracefulSignal = false;
+            
+            if (_process.CloseMainWindow())
             {
-                _logger.LogWarning("Failed to send close message to process, trying CTRL+C");
+                _logger.LogInformation("Sent close message to GUI process");
+                sentGracefulSignal = true;
+            }
+            else
+            {
+                _logger.LogDebug("CloseMainWindow failed (likely console app), trying CTRL+C to process tree");
                 
-                // TODO: Implement CTRL+C signal for console applications
-                // For now, wait a bit then force kill
-                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                // Try CTRL+C for console applications - send to entire process tree
+                var signalCount = await SendCtrlCToProcessTree(_process.Id, cancellationToken);
+                if (signalCount > 0)
+                {
+                    _logger.LogInformation("Sent CTRL+C signal to {SignalCount} processes in tree", signalCount);
+                    sentGracefulSignal = true;
+                }
+                else
+                {
+                    _logger.LogWarning("Failed to send CTRL+C signal to any processes, will force kill after timeout");
+                }
+            }
+            
+            // Give processes time to handle the graceful shutdown signal
+            if (sentGracefulSignal)
+            {
+                _logger.LogInformation("Waiting 2 seconds for processes to begin graceful shutdown...");
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
             }
 
             // Wait for graceful shutdown
@@ -274,6 +344,373 @@ public class ProcessRunner : IDisposable
         }
         
         return startInfo;
+    }
+
+    /// <summary>
+    /// Send CTRL+C signal to a console process
+    /// </summary>
+    /// <param name="processId">Process ID to send signal to</param>
+    /// <returns>True if signal was sent successfully</returns>
+    private bool SendCtrlCToProcess(int processId)
+    {
+        try
+        {
+            _logger.LogDebug("Attempting to send CTRL+C to process {ProcessId}", processId);
+            
+            // Attach to the target process console
+            if (!AttachConsole((uint)processId))
+            {
+                var error = Marshal.GetLastWin32Error();
+                _logger.LogWarning("Failed to attach to console of process {ProcessId}, error: {Error}", processId, error);
+                return false;
+            }
+
+            // Disable CTRL+C handling for our own process to avoid affecting ourselves
+            SetConsoleCtrlHandler(null, true);
+
+            try
+            {
+                // Send CTRL+C event to the process group
+                if (!GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0))
+                {
+                    var error = Marshal.GetLastWin32Error();
+                    _logger.LogWarning("Failed to generate CTRL+C event for process {ProcessId}, error: {Error}", processId, error);
+                    return false;
+                }
+
+                _logger.LogInformation("Successfully sent CTRL+C signal to process {ProcessId}", processId);
+                return true;
+            }
+            finally
+            {
+                // Re-enable CTRL+C handling for our own process
+                SetConsoleCtrlHandler(null, false);
+                
+                // Detach from the target process console
+                FreeConsole();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Exception while sending CTRL+C to process {ProcessId}", processId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Get all child processes of a given process ID
+    /// </summary>
+    /// <param name="parentProcessId">Parent process ID</param>
+    /// <returns>List of child process IDs</returns>
+    private List<int> GetChildProcesses(int parentProcessId)
+    {
+        var childProcesses = new List<int>();
+        
+        try
+        {
+            var snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if (snapshot == INVALID_HANDLE_VALUE)
+            {
+                _logger.LogWarning("Failed to create process snapshot");
+                return childProcesses;
+            }
+
+            try
+            {
+                var processEntry = new PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32)) };
+                
+                if (Process32First(snapshot, ref processEntry))
+                {
+                    do
+                    {
+                        if (processEntry.th32ParentProcessID == parentProcessId)
+                        {
+                            childProcesses.Add((int)processEntry.th32ProcessID);
+                            _logger.LogDebug("Found child process: {ProcessId} ({ProcessName})", 
+                                processEntry.th32ProcessID, processEntry.szExeFile);
+                        }
+                    }
+                    while (Process32Next(snapshot, ref processEntry));
+                }
+            }
+            finally
+            {
+                CloseHandle(snapshot);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error discovering child processes for PID {ParentProcessId}", parentProcessId);
+        }
+
+        return childProcesses;
+    }
+
+    /// <summary>
+    /// Get all processes in the process tree (including grandchildren, etc.)
+    /// </summary>
+    /// <param name="rootProcessId">Root process ID</param>
+    /// <returns>List of all process IDs in the tree</returns>
+    private List<int> GetProcessTree(int rootProcessId)
+    {
+        var allProcesses = new List<int> { rootProcessId };
+        var processesToCheck = new Queue<int>();
+        processesToCheck.Enqueue(rootProcessId);
+
+        while (processesToCheck.Count > 0)
+        {
+            var currentProcessId = processesToCheck.Dequeue();
+            var children = GetChildProcesses(currentProcessId);
+            
+            foreach (var childId in children)
+            {
+                if (!allProcesses.Contains(childId))
+                {
+                    allProcesses.Add(childId);
+                    processesToCheck.Enqueue(childId);
+                }
+            }
+        }
+
+        _logger.LogInformation("Process tree for PID {RootProcessId} contains {ProcessCount} processes: [{ProcessIds}]", 
+            rootProcessId, allProcesses.Count, string.Join(", ", allProcesses));
+        
+        return allProcesses;
+    }
+
+    /// <summary>
+    /// Send CTRL+C signal to all processes in a process tree
+    /// </summary>
+    /// <param name="rootProcessId">Root process ID</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Number of processes that received the signal successfully</returns>
+    private async Task<int> SendCtrlCToProcessTree(int rootProcessId, CancellationToken cancellationToken)
+    {
+        var processTree = GetProcessTree(rootProcessId);
+        var successCount = 0;
+
+        _logger.LogInformation("Sending CTRL+C signal to {ProcessCount} processes in tree", processTree.Count);
+
+        // Send signals to all processes (starting with children, then parents)
+        // This gives child processes a chance to clean up before their parents shut down
+        var reversedTree = processTree.AsEnumerable().Reverse().ToList();
+        
+        foreach (var processId in reversedTree)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                break;
+
+            try
+            {
+                // Check if process is still running
+                using var process = Process.GetProcessById(processId);
+                if (!process.HasExited)
+                {
+                    if (SendCtrlCToProcess(processId))
+                    {
+                        successCount++;
+                    }
+                }
+                else
+                {
+                    _logger.LogDebug("Process {ProcessId} already exited, skipping", processId);
+                }
+            }
+            catch (ArgumentException)
+            {
+                // Process doesn't exist anymore
+                _logger.LogDebug("Process {ProcessId} no longer exists, skipping", processId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error accessing process {ProcessId}", processId);
+            }
+
+            // Small delay between signals to avoid overwhelming the system
+            await Task.Delay(100, cancellationToken);
+        }
+
+        _logger.LogInformation("Successfully sent CTRL+C signal to {SuccessCount}/{TotalCount} processes", 
+            successCount, processTree.Count);
+        
+        return successCount;
+    }
+
+    /// <summary>
+    /// Force kill all processes in the process tree
+    /// </summary>
+    /// <param name="rootProcessId">Root process ID</param>
+    /// <returns>Number of processes that were killed</returns>
+    private int ForceKillProcessTree(int rootProcessId)
+    {
+        var processTree = GetProcessTree(rootProcessId);
+        var killedCount = 0;
+
+        _logger.LogWarning("Force killing {ProcessCount} processes in tree", processTree.Count);
+
+        // Kill processes in reverse order (children first, then parents)
+        var reversedTree = processTree.AsEnumerable().Reverse().ToList();
+        
+        foreach (var processId in reversedTree)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (!process.HasExited)
+                {
+                    _logger.LogWarning("Force killing process {ProcessId} ({ProcessName})", processId, process.ProcessName);
+                    process.Kill(entireProcessTree: true);
+                    killedCount++;
+                    
+                    // Give a small delay to allow the kill to take effect
+                    Thread.Sleep(100);
+                }
+                else
+                {
+                    _logger.LogDebug("Process {ProcessId} already exited, skipping", processId);
+                }
+            }
+            catch (ArgumentException)
+            {
+                // Process doesn't exist anymore
+                _logger.LogDebug("Process {ProcessId} no longer exists, skipping", processId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error force killing process {ProcessId}", processId);
+            }
+        }
+
+        _logger.LogInformation("Force killed {KilledCount}/{TotalCount} processes", killedCount, processTree.Count);
+        
+        // Wait a bit more to ensure processes are fully terminated
+        Thread.Sleep(1000);
+        
+        return killedCount;
+    }
+
+    /// <summary>
+    /// Ensure all processes from previous run are completely terminated before restart
+    /// </summary>
+    private async Task EnsureProcessTreeTerminated()
+    {
+        if (_process == null)
+            return;
+
+        var processId = _process.Id;
+        var processName = _process.ProcessName;
+        
+        _logger.LogInformation("Ensuring complete termination of process tree for PID {ProcessId} ({ProcessName})", processId, processName);
+
+        try
+        {
+            // First, try graceful shutdown if process is still running
+            if (!_process.HasExited)
+            {
+                _logger.LogInformation("Process still running, attempting graceful shutdown first");
+                
+                // Try CTRL+C to the process tree
+                var signalCount = await SendCtrlCToProcessTree(processId, CancellationToken.None);
+                if (signalCount > 0)
+                {
+                    _logger.LogInformation("Sent CTRL+C to {SignalCount} processes, waiting 5 seconds for graceful shutdown", signalCount);
+                    
+                    // Wait for graceful shutdown
+                    var waited = 0;
+                    while (!_process.HasExited && waited < 5000)
+                    {
+                        await Task.Delay(200);
+                        waited += 200;
+                    }
+                }
+            }
+
+            // Force kill any remaining processes
+            if (!_process.HasExited)
+            {
+                _logger.LogWarning("Graceful shutdown failed or timed out, force killing process tree");
+                ForceKillProcessTree(processId);
+            }
+            else
+            {
+                _logger.LogInformation("Main process has exited, checking for orphaned child processes");
+                
+                // Even if main process exited, there might be orphaned children
+                var orphanedChildren = GetChildProcesses(processId);
+                if (orphanedChildren.Count > 0)
+                {
+                    _logger.LogWarning("Found {OrphanCount} orphaned child processes, force killing them", orphanedChildren.Count);
+                    
+                    foreach (var childId in orphanedChildren)
+                    {
+                        try
+                        {
+                            using var childProcess = Process.GetProcessById(childId);
+                            if (!childProcess.HasExited)
+                            {
+                                _logger.LogWarning("Force killing orphaned child process {ProcessId} ({ProcessName})", childId, childProcess.ProcessName);
+                                childProcess.Kill(entireProcessTree: true);
+                                Thread.Sleep(100); // Small delay between kills
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Error killing orphaned child process {ProcessId}", childId);
+                        }
+                    }
+                }
+            }
+
+            // Final verification - wait a bit and check if any processes are still running
+            await Task.Delay(1000);
+            var remainingProcesses = GetProcessTree(processId);
+            var stillRunning = new List<int>();
+            
+            foreach (var pid in remainingProcesses)
+            {
+                try
+                {
+                    using var proc = Process.GetProcessById(pid);
+                    if (!proc.HasExited)
+                    {
+                        stillRunning.Add(pid);
+                    }
+                }
+                catch (ArgumentException)
+                {
+                    // Process doesn't exist - good!
+                }
+            }
+
+            if (stillRunning.Count > 0)
+            {
+                _logger.LogError("WARNING: {StillRunningCount} processes are still running after termination attempt: [{ProcessIds}]", 
+                    stillRunning.Count, string.Join(", ", stillRunning));
+                
+                // Last resort: try to kill them one more time
+                foreach (var pid in stillRunning)
+                {
+                    try
+                    {
+                        using var stubborn = Process.GetProcessById(pid);
+                        _logger.LogError("FORCE KILLING stubborn process {ProcessId} ({ProcessName})", pid, stubborn.ProcessName);
+                        stubborn.Kill(entireProcessTree: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to kill stubborn process {ProcessId}", pid);
+                    }
+                }
+            }
+            else
+            {
+                _logger.LogInformation("All processes in tree have been successfully terminated");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during process tree termination");
+        }
     }
 
     /// <summary>
@@ -452,15 +889,30 @@ public class ProcessRunner : IDisposable
         // Log to WinLet service log (using regular ILogger)
         _logger.LogInformation("Restarting process: {Executable} (attempt {Attempt}/{MaxAttempts})", _config.Process.Executable, _restartAttempts, _config.Restart.MaxAttempts);
 
-        await Task.Delay(TimeSpan.FromSeconds(_config.Restart.DelaySeconds), cancellationToken);
-
         try
         {
+            // CRITICAL: Ensure all processes from previous run are completely dead before restart
+            _logger.LogInformation("Ensuring complete termination of previous process tree before restart");
+            await EnsureProcessTreeTerminated();
+            
+            // Clear the previous process reference since we've ensured it's terminated
+            _process?.Dispose();
+            _process = null;
+            
+            // Wait the configured delay before restarting
+            _logger.LogInformation("Waiting {DelaySeconds} seconds before restart attempt", _config.Restart.DelaySeconds);
+            await Task.Delay(TimeSpan.FromSeconds(_config.Restart.DelaySeconds), cancellationToken);
+
+            _logger.LogInformation("Starting fresh process instance");
             await StartAsync(cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to restart process");
+            
+            // Log the restart failure to application error log as well
+            var restartErrorMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [ERROR] Restart attempt {_restartAttempts}/{_config.Restart.MaxAttempts} failed: {ex.Message}\n";
+            await _logManager.WriteStderrAsync(restartErrorMessage);
         }
     }
 
