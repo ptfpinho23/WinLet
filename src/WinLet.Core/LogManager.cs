@@ -324,6 +324,10 @@ public class LogManager : IDisposable
     /// </summary>
     private bool ShouldRollBySize(long currentSize)
     {
+
+        if (_config.Mode == LogMode.RollByTime)
+            return false;
+            
         if (_config.Mode != LogMode.RollBySize && _config.Mode != LogMode.RollBySizeTime)
             return false;
 
@@ -410,17 +414,55 @@ public class LogManager : IDisposable
             return;
 
         var directory = Path.GetDirectoryName(filePath)!;
-        var baseFileName = Path.GetFileNameWithoutExtension(filePath);
-        var extension = Path.GetExtension(filePath);
+        var fileName = Path.GetFileName(filePath);
 
-        // Find the next available number
-        var rollNumber = 1;
         string rolledFile;
-        do
+        var rollNumber = 1;
+        
+
+        if (_config.Mode == LogMode.RollByTime && !string.IsNullOrEmpty(_config.TimePattern))
         {
-            rolledFile = Path.Combine(directory, $"{baseFileName}.{rollNumber}{extension}");
-            rollNumber++;
-        } while (File.Exists(rolledFile) && rollNumber <= _config.KeepFiles);
+            _logger.LogDebug("Skipping roll for time-based file (will roll at midnight): {File}", filePath);
+            return;
+        }
+        
+        if (_config.Mode == LogMode.RollBySizeTime && !string.IsNullOrEmpty(_config.TimePattern))
+        {
+            // For mixed time+size rolling, insert roll number before the final .log extension
+            // Pattern: ServiceName.YYYYMMDD.type.log -> ServiceName.YYYYMMDD.type.N.log
+            var lastDotIndex = fileName.LastIndexOf('.');
+            if (lastDotIndex > 0)
+            {
+                var nameWithoutExt = fileName.Substring(0, lastDotIndex);
+                var extension = fileName.Substring(lastDotIndex);
+                
+                do
+                {
+                    rolledFile = Path.Combine(directory, $"{nameWithoutExt}.{rollNumber}{extension}");
+                    rollNumber++;
+                } while (File.Exists(rolledFile) && rollNumber <= _config.KeepFiles);
+            }
+            else
+            {
+                // Fallback if no extension found
+                do
+                {
+                    rolledFile = Path.Combine(directory, $"{fileName}.{rollNumber}");
+                    rollNumber++;
+                } while (File.Exists(rolledFile) && rollNumber <= _config.KeepFiles);
+            }
+        }
+        else
+        {
+            var baseFileName = Path.GetFileNameWithoutExtension(filePath);
+            var extension = Path.GetExtension(filePath);
+            
+            do
+            {
+                rolledFile = Path.Combine(directory, $"{baseFileName}.{rollNumber}{extension}");
+                rollNumber++;
+            } while (File.Exists(rolledFile) && rollNumber <= _config.KeepFiles);
+        }
 
         try
         {
