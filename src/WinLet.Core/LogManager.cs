@@ -422,7 +422,7 @@ public class LogManager : IDisposable
 
         if (_config.Mode == LogMode.RollByTime && !string.IsNullOrEmpty(_config.TimePattern))
         {
-            _logger.LogDebug("Skipping roll for time-based file (will roll at midnight): {File}", filePath);
+            _logger.LogDebug("Skipping roll for time-based file (will roll at {AutoRollAtTime}): {File}", _config.AutoRollAtTime, filePath);
             return;
         }
         
