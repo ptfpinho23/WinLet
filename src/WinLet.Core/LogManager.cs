@@ -192,29 +192,56 @@ public class LogManager : IDisposable
     /// </summary>
     private void SetupTimeRolling()
     {
+        
         if (string.IsNullOrEmpty(_config.AutoRollAtTime))
+        {
             return;
+        }
 
         try
         {
+            
             if (TimeSpan.TryParse(_config.AutoRollAtTime, out var rollTime))
             {
+
                 var now = DateTime.Now;
+                
+                // Calculate next roll time with high precision
                 var nextRoll = now.Date.Add(rollTime);
+                
                 if (nextRoll <= now)
+                {
                     nextRoll = nextRoll.AddDays(1);
+                }
 
-                var dueTime = nextRoll - now;
+                // Use high-precision calculation to avoid floating-point errors
+                var dueTimeTicks = nextRoll.Ticks - now.Ticks;
+                var dueTime = new TimeSpan(dueTimeTicks);
+
+                // Additional precision check - ensure we're not scheduling in the past due to precision issues
+                if (dueTimeTicks <= 0)
+                {
+                    _logger.LogWarning("DueTime calculated as negative or zero ({DueTime}), adjusting to next day", dueTime);
+                    nextRoll = nextRoll.AddDays(1);
+                    dueTimeTicks = nextRoll.Ticks - now.Ticks;
+                    dueTime = new TimeSpan(dueTimeTicks);
+                }
+
                 var period = TimeSpan.FromDays(1);
-
-                _timeRollTimer = new Timer(OnTimeRoll, null, dueTime, period);
-                _logger.LogDebug("Time-based rolling scheduled for {NextRoll}", nextRoll);
+                _timeRollTimer = new Timer(OnTimeRoll, nextRoll, dueTime, period);
+                _logger.LogInformation("Time-based rolling scheduled for {NextRoll:yyyy-MM-dd HH:mm:ss.fff} (in {DueTime}), repeating every {Period}", nextRoll, dueTime, period);
+            }
+            else
+            {
+                _logger.LogWarning("Failed to parse AutoRollAtTime: '{AutoRollAtTime}'. Expected format: HH:mm:ss", _config.AutoRollAtTime);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to setup time-based rolling");
+            _logger.LogError(ex, "Exception in SetupTimeRolling - AutoRollAtTime: '{AutoRollAtTime}'", 
+                _config.AutoRollAtTime);
         }
+        
     }
 
     /// <summary>
@@ -224,16 +251,18 @@ public class LogManager : IDisposable
     {
         try
         {
-            _logger.LogDebug("Performing time-based log roll");
+            var now = DateTime.Now;
+            var targetTime = state as DateTime?;
+            
+            _logger.LogInformation("Performing time-based log roll at {Now}", now);
             PerformLogRoll(LogRollReason.Time).GetAwaiter().GetResult();
 
-            // (Optional) Deferred archive still okay; PerformLogRoll already triggers archive.
             // Schedule delayed archiving after time roll
             ScheduleDelayedArchiving();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during time-based log roll");
+            _logger.LogError(ex, "Error during time-based log roll at {Now}", DateTime.Now);
         }
     }
 
@@ -710,13 +739,12 @@ public class LogManager : IDisposable
                                 continue;
                             }
 
+
                             // Check if entry already exists in zip to avoid duplicates (only for Update mode)
                             var entryName = file.Name;
-                            _logger.LogInformation("[VERSION_CHECK_v2025_09_08_15_16] ZipMode is: {ZipMode}, checking duplicates for: {EntryName}", zipMode, entryName);
                             
                             if (zipMode == ZipArchiveMode.Update)
                             {
-                                _logger.LogInformation("[VERSION_CHECK_v2025_09_08_15_16] In Update mode, checking for existing entries");
                                 try
                                 {
                                     if (zip.Entries.Any(e => e.Name.Equals(entryName, StringComparison.OrdinalIgnoreCase)))
@@ -728,15 +756,9 @@ public class LogManager : IDisposable
                                 }
                                 catch (Exception ex)
                                 {
-                                    _logger.LogError(ex, "[VERSION_CHECK_v2025_09_08_15_16] Could not check zip entries in Update mode, proceeding with archiving: {File}", file.FullName);
+                                    _logger.LogError(ex, "Could not check zip entries in Update mode, proceeding with archiving: {File}", file.FullName);
                                 }
                             }
-                            else
-                            {
-                                _logger.LogInformation("[VERSION_CHECK_v2025_09_08_15_16] In Create mode, skipping duplicate check");
-                            }
-
-                            // Try to open file with appropriate sharing - if it fails, the file is locked
                             _logger.LogInformation("Opening file for reading: {File}", file.FullName);
                             using var src = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                             var entry = zip.CreateEntry(entryName, CompressionLevel.Optimal);
@@ -845,14 +867,17 @@ public class LogManager : IDisposable
         if (_disposed)
             return;
 
-        _timeRollTimer?.Dispose();
-        _delayedArchiveTimer?.Dispose();
-        _stdoutWriter?.Close();
-        _stderrWriter?.Close();
-        _stdoutStream?.Close();
-        _stderrStream?.Close();
+        _logger.LogInformation("LogManager disposing - cleaning up timers and streams");
+        
+        try { _timeRollTimer?.Dispose(); } catch (Exception ex) { _logger.LogWarning(ex, "Error disposing time roll timer"); }
+        try { _delayedArchiveTimer?.Dispose(); } catch (Exception ex) { _logger.LogWarning(ex, "Error disposing delayed archive timer"); }
+        try { _stdoutWriter?.Close(); } catch (Exception ex) { _logger.LogWarning(ex, "Error closing stdout writer"); }
+        try { _stderrWriter?.Close(); } catch (Exception ex) { _logger.LogWarning(ex, "Error closing stderr writer"); }
+        try { _stdoutStream?.Close(); } catch (Exception ex) { _logger.LogWarning(ex, "Error closing stdout stream"); }
+        try { _stderrStream?.Close(); } catch (Exception ex) { _logger.LogWarning(ex, "Error closing stderr stream"); }
 
         _disposed = true;
+        _logger.LogInformation("LogManager disposed successfully");
     }
 }
 
@@ -865,3 +890,4 @@ public enum LogRollReason
     Time,
     Manual
 }
+
