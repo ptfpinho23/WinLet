@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.ServiceProcess;
 using Microsoft.Extensions.Logging;
@@ -76,6 +77,25 @@ public class WindowsServiceManager
                 }
             }
             
+            // Grant "Log on as a service" right if requested
+            var account = config.ServiceAccount;
+            if (account?.AllowServiceLogon == true &&
+                account.Username is { Length: > 0 } username &&
+                !IsBuiltInAccount(username))
+            {
+                Console.WriteLine($"Granting 'Log on as a service' right to '{username}'...");
+                try
+                {
+                    GrantServiceLogonRight(username);
+                    Console.WriteLine("'Log on as a service' right granted successfully");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Warning: Failed to grant 'Log on as a service' right: {ex.Message}");
+                    _logger.LogWarning("Failed to grant SeServiceLogonRight to {Username}: {Error}", username, ex.Message);
+                }
+            }
+
             _logger.LogInformation("Service '{ServiceName}' installed successfully", config.Name);
         }
         catch (Exception ex)
@@ -251,9 +271,149 @@ public class WindowsServiceManager
             "type= own"
         };
 
-        // Note: Description is set separately after service creation
+        // Add service account if configured
+        var account = config.ServiceAccount;
+        if (account?.Username is { Length: > 0 } username)
+        {
+            arguments.Add($"obj= \"{username}\"");
+
+            // Built-in accounts (LocalSystem, LocalService, NetworkService) don't need a password
+            if (!IsBuiltInAccount(username) && !string.IsNullOrEmpty(account.Password))
+                arguments.Add($"password= \"{account.Password}\"");
+        }
+
+        // Note: Description and service logon right are applied after service creation
 
         return string.Join(" ", arguments);
+    }
+
+    private static readonly string[] BuiltInAccounts =
+    [
+        "localsystem", @".\localsystem", "system",
+        @"nt authority\localservice", "localservice",
+        @"nt authority\networkservice", "networkservice",
+        @"nt authority\system"
+    ];
+
+    private static bool IsBuiltInAccount(string username) =>
+        BuiltInAccounts.Contains(username.ToLowerInvariant().Trim());
+
+    /// <summary>
+    /// Grants the "Log on as a service" (SeServiceLogonRight) privilege to the specified account
+    /// using the LSA policy API.
+    /// </summary>
+    private static void GrantServiceLogonRight(string username)
+    {
+        var sid = ResolveAccountSid(username);
+
+        var systemName = new LsaUnicodeString();
+        var objectAttributes = new LsaObjectAttributes();
+
+        var status = NativeMethods.LsaOpenPolicy(ref systemName, ref objectAttributes,
+            PolicyAccess.LookupNames | PolicyAccess.CreateAccount, out var policyHandle);
+        ThrowIfLsaError(status, "LsaOpenPolicy");
+
+        try
+        {
+            var right = new LsaUnicodeString("SeServiceLogonRight");
+            var rights = new[] { right };
+            status = NativeMethods.LsaAddAccountRights(policyHandle, sid, rights, (uint)rights.Length);
+            ThrowIfLsaError(status, "LsaAddAccountRights");
+        }
+        finally
+        {
+            NativeMethods.LsaClose(policyHandle);
+        }
+    }
+
+    private static byte[] ResolveAccountSid(string username)
+    {
+        var sid = new byte[256];
+        var sidSize = sid.Length;
+        var domainName = new System.Text.StringBuilder(256);
+        var domainNameSize = domainName.Capacity;
+
+        if (!NativeMethods.LookupAccountName(null, username, sid, ref sidSize, domainName, ref domainNameSize, out _))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not resolve account '{username}'");
+
+        var result = new byte[sidSize];
+        Array.Copy(sid, result, sidSize);
+        return result;
+    }
+
+    private static void ThrowIfLsaError(uint ntStatus, string operation)
+    {
+        if (ntStatus == 0) return; // STATUS_SUCCESS
+        var win32Error = NativeMethods.LsaNtStatusToWinError(ntStatus);
+        throw new Win32Exception((int)win32Error, $"{operation} failed with NTSTATUS 0x{ntStatus:X8}");
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static class NativeMethods
+    {
+        [DllImport("advapi32.dll", SetLastError = true)]
+        internal static extern bool LookupAccountName(
+            string? systemName,
+            string accountName,
+            [Out] byte[] sid,
+            ref int cbSid,
+            System.Text.StringBuilder referencedDomainName,
+            ref int cbReferencedDomainName,
+            out int use);
+
+        [DllImport("advapi32.dll")]
+        internal static extern uint LsaOpenPolicy(
+            ref LsaUnicodeString systemName,
+            ref LsaObjectAttributes objectAttributes,
+            PolicyAccess desiredAccess,
+            out IntPtr policyHandle);
+
+        [DllImport("advapi32.dll")]
+        internal static extern uint LsaAddAccountRights(
+            IntPtr policyHandle,
+            [MarshalAs(UnmanagedType.LPArray)] byte[] accountSid,
+            [MarshalAs(UnmanagedType.LPArray)] LsaUnicodeString[] userRights,
+            uint countOfRights);
+
+        [DllImport("advapi32.dll")]
+        internal static extern uint LsaClose(IntPtr objectHandle);
+
+        [DllImport("advapi32.dll")]
+        internal static extern uint LsaNtStatusToWinError(uint status);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LsaObjectAttributes
+    {
+        public int Length;
+        public IntPtr RootDirectory;
+        public IntPtr ObjectName;
+        public int Attributes;
+        public IntPtr SecurityDescriptor;
+        public IntPtr SecurityQualityOfService;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct LsaUnicodeString
+    {
+        public ushort Length;
+        public ushort MaximumLength;
+        [MarshalAs(UnmanagedType.LPWStr)]
+        public string? Buffer;
+
+        public LsaUnicodeString(string value)
+        {
+            Buffer = value;
+            Length = (ushort)(value.Length * 2);
+            MaximumLength = (ushort)(Length + 2);
+        }
+    }
+
+    [Flags]
+    private enum PolicyAccess : uint
+    {
+        LookupNames   = 0x00000800,
+        CreateAccount = 0x00000010,
     }
 
     private async Task<(int ExitCode, string Output)> RunServiceControlCommand(string command, string arguments)
