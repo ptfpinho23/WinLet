@@ -266,7 +266,8 @@ public class ProcessRunner : IDisposable
 
     private ProcessStartInfo CreateProcessStartInfo()
     {
-        var workDir = _config.Process.WorkingDirectory ?? Environment.CurrentDirectory;
+        // Determine working directory with better fallback logic
+        var workDir = GetEffectiveWorkingDirectory();
         
         // Handle executable path correctly - don't combine with working directory if it's already absolute
         var executable = _config.Process.Executable;
@@ -344,6 +345,37 @@ public class ProcessRunner : IDisposable
         }
         
         return startInfo;
+    }
+
+    /// <summary>
+    /// Determine the effective working directory with proper fallback logic
+    /// </summary>
+    /// <returns>The working directory path to use</returns>
+    private string GetEffectiveWorkingDirectory()
+    {
+        // If working directory is explicitly set and not just whitespace, use it
+        if (!string.IsNullOrWhiteSpace(_config.Process.WorkingDirectory))
+        {
+            return _config.Process.WorkingDirectory;
+        }
+
+        // If executable is an absolute path, use its directory as working directory
+        if (Path.IsPathRooted(_config.Process.Executable))
+        {
+            var executableDir = Path.GetDirectoryName(_config.Process.Executable);
+            if (!string.IsNullOrEmpty(executableDir))
+            {
+                _logger.LogInformation("Using executable directory as working directory: {WorkingDirectory}", executableDir);
+                return executableDir;
+            }
+        }
+
+        // As a last resort, use current directory (but log a warning since this might be System32 for services)
+        var currentDir = Environment.CurrentDirectory;
+        _logger.LogWarning("No working directory specified and executable is relative. Using current directory: {CurrentDirectory}. " +
+                          "This may be C:\\Windows\\System32 for Windows services. Consider specifying an explicit working_directory in your configuration.", 
+                          currentDir);
+        return currentDir;
     }
 
     /// <summary>

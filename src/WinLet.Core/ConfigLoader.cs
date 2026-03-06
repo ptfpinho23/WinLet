@@ -192,7 +192,8 @@ public class ConfigLoader
             
         if (loggingTable.TryGetValue("mode", out var mode))
         {
-            if (Enum.TryParse<LogMode>(mode.ToString().Replace("-", ""), true, out var logMode))
+            var modeString = mode?.ToString();
+            if (!string.IsNullOrEmpty(modeString) && Enum.TryParse<LogMode>(modeString.Replace("-", ""), true, out var logMode))
                 logging.Mode = logMode;
         }
         
@@ -356,10 +357,18 @@ public class ConfigLoader
             throw new ConfigurationException("Process executable is required");
         }
 
-        if (!string.IsNullOrEmpty(config.Process.WorkingDirectory) && 
-            !Directory.Exists(config.Process.WorkingDirectory))
+        // Validate working directory - check for whitespace-only values and existence
+        if (!string.IsNullOrEmpty(config.Process.WorkingDirectory))
         {
-            throw new ConfigurationException($"Working directory does not exist: {config.Process.WorkingDirectory}");
+            if (string.IsNullOrWhiteSpace(config.Process.WorkingDirectory))
+            {
+                throw new ConfigurationException("Working directory cannot be whitespace-only. Either specify a valid path or leave it empty to use automatic detection.");
+            }
+            
+            if (!Directory.Exists(config.Process.WorkingDirectory))
+            {
+                throw new ConfigurationException($"Working directory does not exist: {config.Process.WorkingDirectory}");
+            }
         }
     }
 }
